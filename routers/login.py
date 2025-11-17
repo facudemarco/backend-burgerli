@@ -87,9 +87,21 @@ def getUserById(id_user_client: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/create_user", tags=["Users Clients"])
-def createUser(user: UserCreate):
+@router.post("/registerUserClients", tags=["Users Clients"])
+def registerUserClients(user: UserCreate):
     try:
+        with engine.connect() as conn:
+            existing_user = conn.execute(
+                text("SELECT id_user_client FROM user_client WHERE email = :email"),
+                {"email": user.email}
+            ).scalar()
+            
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email already registered"
+                )
+        
         user_id = str(uuid.uuid4())
         payload = user.model_dump()
 
