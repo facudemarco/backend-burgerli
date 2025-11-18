@@ -100,6 +100,7 @@ class OrderUserClient(Base):
 
 class OrderMan(BaseModel):
     id_order: Optional[str] = None
+    user_client_id: Optional[str] = None
     payment_method: Optional[str] = None
     delivery_mode: Optional[str] = None
     price: Optional[float] = None
