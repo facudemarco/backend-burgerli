@@ -123,18 +123,6 @@ def get_burgers():
 def delete_burger(id_burger: str):
     try:
         with engine.begin() as conn:
-            result = conn.execute(
-                text("""
-                    DELETE FROM burger
-                    WHERE id_burger = :id_burger
-                """),
-                {"id_burger": id_burger},
-            )
-
-            for u in os.listdir(IMAGES_DIR):
-                if u.startswith(id_burger):
-                    os.remove(os.path.join(IMAGES_DIR, u))
-            
             conn.execute(
                 text("DELETE FROM burger_main_imgs WHERE burger_id = :id_burger"),
                 {"id_burger": id_burger},
@@ -147,6 +135,19 @@ def delete_burger(id_burger: str):
                 text("DELETE FROM burger_ingredients WHERE burger_id = :id_burger"),
                 {"id_burger": id_burger},
             )
+            
+            result = conn.execute(
+                text("""
+                    DELETE FROM burger
+                    WHERE id_burger = :id_burger
+                """),
+                {"id_burger": id_burger},
+            )
+            if os.path.exists(IMAGES_DIR):
+                for u in os.listdir(IMAGES_DIR):
+                    if u.startswith(id_burger):
+                        os.remove(os.path.join(IMAGES_DIR, u))
+            
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Burger not found")
 
