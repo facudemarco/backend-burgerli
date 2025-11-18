@@ -1,3 +1,6 @@
 .env
 /venv
 node_modules
+images/
+_pycache_/
+*.pyc

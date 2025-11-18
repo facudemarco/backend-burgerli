@@ -33,14 +33,14 @@ app.add_middleware(
 )
 
 IMAGES_DIR = os.path.join(os.getcwd(), "images")
-app.mount("/api/images", StaticFiles(directory=IMAGES_DIR), name="images")
+app.mount("/api/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 IS_PROD = os.getenv("ENV") == "production"
 print(IS_PROD)
 
 @app.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "API Burgerli By iWeb Technology. All rights reserved ©"}
 
 app.include_router(login.router)
 app.include_router(ws.router)

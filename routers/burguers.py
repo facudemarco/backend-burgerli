@@ -6,10 +6,11 @@ from sqlalchemy import text
 from Database.getConnection import engine
 import uuid
 from models.users_client import UserCreate, UserUpdate, FavouriteCreate, FavouriteToggleRequest
+from pathlib import Path
 
 router = APIRouter()
 
-IMAGES_DIR = "images/"
+IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "/home/iweb/burgerli/data/images"))
 DOMAIN_URL = "https://api-burgerli.iwebtecnology.com/api/images"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
