@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from routers.paymentController import router as payment_router
 from fastapi.staticfiles import StaticFiles
+from routers.favorites import router as favorites_router
 
 app = FastAPI(root_path="/api")
 
@@ -47,3 +48,4 @@ app.include_router(ws.router)
 app.include_router(burger_router)
 app.include_router(payment_router)
 app.include_router(orders_router)
+app.include_router(favorites_router)

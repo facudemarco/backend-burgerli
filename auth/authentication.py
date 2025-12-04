@@ -41,56 +41,46 @@ def verify_token(token: str):
         return payload
 
 def get_current_user(request: Request):
-    # 👇 la cookie que VOS pusiste. Si se llama distinto, cambiá esto.
     token = request.cookies.get("Authorization")
+    
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer "):]
 
-    # Swagger NO manda cookies ⇒ esto se va a disparar ahí
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token not found in cookies",
+            detail="Token not found",
         )
 
-    # por si viene como "Bearer xxx"
     if token.startswith("Bearer "):
         token = token[len("Bearer "):]
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
-        # token roto / expirado
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         )
 
-    # acá depende de cómo LO GENERASTE
-    user_id = payload.get("id")  # o "sub"
-    if user_id is None:
+    user_id = payload.get("id")
+    username = payload.get("username")
+    rol = payload.get("rol")
+    local = payload.get("local")
+
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
 
-    # buscar en la db
-    with engine.begin() as conn:
-        row = conn.execute(
-            text("SELECT id_user, name, role, branch FROM users WHERE id_user = :id"),
-            {"id": user_id},
-        ).mappings().first()
-
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-
-    # lo que le va a llegar al endpoint
     return {
-        "id": row["id"],
-        "username": row["username"],
-        "rol": row["rol"],
-        "local": row["local"],
+        "id": user_id,
+        "username": username,
+        "rol": rol,
+        "local": local,
     }
 
 async def get_current_user_ws(token: str) -> str:
