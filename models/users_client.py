@@ -5,7 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from fastapi import Form
 
 class UserCreate(BaseModel):
-    id_user_client: str 
+    id_user_client: Optional[str]
     name: str = Form(...)
     email: str = Form(...)
     phone: str = Form(...)
