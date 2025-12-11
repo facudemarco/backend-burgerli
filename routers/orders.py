@@ -118,7 +118,6 @@ async def create_order(order: OrderMan):
                 'order_id': id_order
             }
             await manager.broadcast_to_dashboards(message_dashboard)
-            # print(f"Broadcasted to dashboards: {message_dashboard}")
             
             # Transaction will auto-commit here
             return {"message": "Order created successfully", "order_id": id_order}
@@ -270,12 +269,13 @@ async def update_order_status(
         # 7) Avisar a TODOS los DASHBOARDS
         await manager.broadcast_to_dashboards(payload)
 
+        print(f"[PATCH /orders/{id_order}/status] status updated successfully")
+        print(f"payload: {payload}")
         # 8) Respuesta HTTP
         return {
             "message": "Order status updated successfully",
             **payload,
         }
-
     except HTTPException:
         # re-lanzo las HTTPException tal cual
         raise
@@ -288,14 +288,55 @@ async def update_order_status(
 async def delete_order(id_order: str):
     try:
         with engine.begin() as conn:
-            conn.execute(text("DELETE FROM order_products WHERE order_id = :order_id"), {"order_id": id_order})
-            
-            conn.execute(text("DELETE FROM order_coupons WHERE id_order = :id_order"), {"id_order": id_order})
+            # 1) Eliminar dependencias
+            conn.execute(
+                text("DELETE FROM order_products WHERE order_id = :order_id"),
+                {"order_id": id_order},
+            )
 
-            result = conn.execute(text("DELETE FROM orders WHERE id_order = :id_order"), {"id_order": id_order})
+            conn.execute(
+                text("DELETE FROM order_coupons WHERE id_order = :id_order"),
+                {"id_order": id_order},
+            )
+
+            # 2) Eliminar la orden
+            result = conn.execute(
+                text("DELETE FROM orders WHERE id_order = :id_order"),
+                {"id_order": id_order},
+            )
+
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Order not found")
-            return {"message": "Order deleted successfully"}
+
+        # 3) Payload WS (igual que PATCH pero con otro event)
+        payload = {
+            "event": "order_deleted",
+            "id_order": id_order,
+        }
+
+        # DEBUG: ver si el manager tiene conexiones
+        print("[DELETE] manager id:", id(manager))
+        print("[DELETE] order_connections keys:", list(manager.order_connections.keys()))
+        print("[DELETE] dashboards activos:", len(manager.dashboard_connections))
+
+        # 4) Avisar a la TIENDA (tracking de esa orden)
+        await manager.broadcast_order(id_order, payload)
+
+        # 5) Avisar a TODOS los DASHBOARDS
+        await manager.broadcast_to_dashboards(payload)
+
+        # 6) Respuesta HTTP
+        return {
+            "message": "Order deleted successfully",
+            **payload,
+        }
+
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database connection error: {str(e)}",
+        )
+    except Exception as e:
+        print(f"[DELETE /deleteOrder/{id_order}] error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

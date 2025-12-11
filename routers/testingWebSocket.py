@@ -127,7 +127,7 @@ async def websocket_order_tracking(websocket: WebSocket, order_id: str):
             return
 
     await manager.connect_order(order_id, websocket)
-
+    print(f"[WS] TRACKING conectado. manager id={id(manager)}  order_id={order_id}  total_conns={len(manager.order_connections)}")
     try:
         # En este caso no esperamos mensajes de la tienda,
         # solo mantenemos viva la conexión.
@@ -174,11 +174,12 @@ async def websocket_dashboard(websocket: WebSocket):
             user_id = f"dashboard_{id(websocket)}"
 
         await manager.connect_dashboard(websocket, user_id)
+        print(f"[WS] DASHBOARD conectado. manager id={id(manager)}  total_dash={len(manager.dashboard_connections)}")
     except WSAuthError as e:
         try:
             await websocket.close(code=e.code)
         except Exception:
-            pass
+            pass    
         print(f"[WS DASHBOARD AUTH] rechazo: {e}")
         return
     except Exception as e:

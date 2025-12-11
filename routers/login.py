@@ -93,18 +93,14 @@ def registerUserClients(user: UserCreate):
         with engine.connect() as conn:
             existing_user = conn.execute(
                 text("SELECT id_user_client FROM user_client WHERE email = :email"),
-                {"email": user.email}
+                {"email": user.email},
             ).scalar()
-            
-            if existing_user:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Email already registered"
-                )
-        
+
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
         user_id = str(uuid.uuid4())
         payload = user.model_dump()
-
         normalized_addresses = payload.pop("address", [])
 
         with engine.begin() as conn:
@@ -128,24 +124,39 @@ def registerUserClients(user: UserCreate):
                         "address": address,
                     },
                 )
+
         return {"message": "User created successfully", "id_user_client": user_id}
+
+    except HTTPException:
+        # Dejá pasar los HTTPException tal cual
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Solo otros errores se transforman en 500
+        raise HTTPException(status_code=500, detail="Error al crear usuario. Vuelva a intentarlo más tarde.")
+
 
 @router.put("/mod-user/{id_user_client}", tags=["Users Clients"])
 def updateUser(id_user_client: str, user: UserUpdate):
     try:
         payload = user.model_dump()
+
         with engine.begin() as conn:
+            # 1) Verificar direcciones actuales
             current_addresses = conn.execute(
-                text("SELECT COUNT(*) FROM user_client_address WHERE user_id = :user_id"),
-                {"user_id": id_user_client}
+                text("""
+                    SELECT COUNT(*)
+                    FROM user_client_address
+                    WHERE user_id = :user_id
+                """),
+                {"user_id": id_user_client},
             ).scalar()
 
+            # 2) Actualizar datos del usuario
             result = conn.execute(
                 text("""
                     UPDATE user_client
-                    SET name = :name,
+                    SET
+                        name = :name,
                         email = :email,
                         phone = :phone,
                         password = :password,
@@ -153,16 +164,25 @@ def updateUser(id_user_client: str, user: UserUpdate):
                         notes = :notes
                     WHERE id_user_client = :id_user_client
                 """),
-                {**payload, "id_user_client": id_user_client},
+                {
+                    "name": payload["name"],
+                    "email": payload["email"],
+                    "phone": payload["phone"],
+                    "password": payload["password"],
+                    "locality": payload["locality"],
+                    "notes": payload["notes"],
+                    "id_user_client": id_user_client,
+                },
             )
 
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="User not found")
 
+            # 3) Actualizar direcciones
             new_addresses = payload.get("addresses", [])
-            
+
             if current_addresses == 0 and len(new_addresses) > 0:
-                print(f"Adding {len(new_addresses)} new addresses for user with no existing addresses")
+                # Usuario sin direcciones previas → solo insert
                 for address in new_addresses:
                     conn.execute(
                         text("""
@@ -172,36 +192,48 @@ def updateUser(id_user_client: str, user: UserUpdate):
                         {
                             "id": str(uuid.uuid4()),
                             "user_id": id_user_client,
-                            "address": address
-                        }
+                            "address": address,
+                        },
                     )
+
             elif new_addresses is not None:
+                # Usuario con direcciones → borramos todas y reinsertamos
                 conn.execute(
-                    text("DELETE FROM user_client_address WHERE user_id = :user_id"),
-                    {"user_id": id_user_client}
+                    text("""
+                        DELETE FROM user_client_address
+                        WHERE user_id = :user_id
+                    """),
+                    {"user_id": id_user_client},
                 )
+
                 for address in new_addresses:
                     conn.execute(
                         text("""
-                            INSERT INTO user_client_address (address_id, user_id, address)
-                            VALUES (:address_id, :user_id, :address)
+                            INSERT INTO user_client_address (id, user_id, address)
+                            VALUES (:id, :user_id, :address)
                         """),
                         {
-                            "address_id": str(uuid.uuid4()),
+                            "id": str(uuid.uuid4()),
                             "user_id": id_user_client,
-                            "address": address
-                        }
+                            "address": address,
+                        },
                     )
 
+        # 👆 IMPORTANTE: el return va *después* del with
+
         return {
-            "message": "User updated successfully", 
+            "message": "User updated successfully",
             "id_user_client": id_user_client,
-            "addresses_added": len(new_addresses) if new_addresses else 0
+            "addresses_added": len(new_addresses) if new_addresses else 0,
         }
-        
+
+    except HTTPException:
+        # Relevantar HTTPException tal cual
+        raise
     except Exception as e:
-        print(f"Error updating user: {str(e)}")  # For debugging
+        print(f"Error updating user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.delete("/delete_user/{id_user_client}", tags=["Users Clients"])
 def deleteUser(id_user_client: str):
