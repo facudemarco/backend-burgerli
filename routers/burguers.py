@@ -317,6 +317,28 @@ async def create_dip(
         )
     return {"message": "Dip created", "id": dip_id}
 
+@router.get("/dips", tags=["Food"])
+def get_dips():
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(text("SELECT * FROM dips"))
+            rows = result.mappings().all()
+            if not rows:
+                raise HTTPException(status_code=404, detail="No dips found.")
+            dips = []
+            for dip in rows:
+                hid = dip["id_dips"]
+                images = conn.execute(
+                    text("SELECT url FROM dips_imgs WHERE dips_id = :id"),
+                    {"id": hid}
+                ).scalars().all()
+                data = dict(dip)
+                data["images"] = images
+                dips.append(data)
+            return dips
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/drinks", tags=["Food"])
 async def create_drinks(
     name: str = Form(...),
