@@ -265,6 +265,42 @@ def get_fries():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/dips", tags=["Food"])
+async def create_dip(
+    name: str = Form(...),
+    image: UploadFile = File(..., description="Dip image"),
+    stock: bool = Form(...),
+    price: float = Form(...)
+):
+    dip_id = str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO dips (id_dips, name, stock, price)
+                VALUES (:id, :name, :stock, :price)
+            """),
+            {
+                "id": dip_id,
+                "name": name,
+                "stock": stock,
+                "price": price
+            }
+        )
+    if not os.path.exists(IMAGES_DIR):
+        os.makedirs(IMAGES_DIR, exist_ok=True)
+    ext = os.path.splitext(image.filename or "file.jpg")[1]
+    fname = f"{uuid.uuid4()}{ext}"
+    path = os.path.join(IMAGES_DIR, fname)
+    with open(path, "wb") as buf:
+        shutil.copyfileobj(image.file, buf)
+    url_image = f"{DOMAIN_URL}/{fname}"
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO dips_imgs (id, dips_id, url) VALUES (:id, :dips_id, :url)"),
+            {"id": str(uuid.uuid4()), "dips_id": dip_id, "url": url_image}
+        )
+    return {"message": "Dip created", "id": dip_id}
+
 @router.post("/drinks", tags=["Food"])
 async def create_drinks(
     name: str = Form(...),

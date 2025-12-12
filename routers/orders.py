@@ -57,11 +57,11 @@ async def create_order(order: OrderMan):
 
         with engine.begin() as conn:
             conn.execute(text("""
-                INSERT INTO orders (id_order, user_client_id, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
-                VALUES (:id_order, :user_client_id, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
+                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
+                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
             """), {
                 "id_order": id_order,
-                "user_client_id": user_client_id,
+                "id_user_client": user_client_id,
                 "payment_method": payment_method,
                 "delivery_mode": delivery_mode,
                 "price": price,
