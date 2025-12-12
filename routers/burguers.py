@@ -160,7 +160,7 @@ async def create_fries(
     name: str = Form(...),
     size: List[str] = Form(default=[]),
     description: List[str] = Form(default=[]),
-    price: str = Form(...),
+    price: List[float] = Form(...),
     stock: bool = Form(...),
     main_image: UploadFile = File(..., description="Main image")
 ):
@@ -195,6 +195,22 @@ async def create_fries(
                 VALUES (:id, :fries_id, :size)
             """),
             {"id": str(uuid.uuid4()), "fries_id": fries_id, "size": d}
+        )
+    
+    # Insert prices
+    normalized_price = []
+    for p in price:
+        if isinstance(p, str) and "," in p:
+            normalized_price.extend([float(item.strip()) for item in p.split(",") if item.strip()])
+        elif p:
+            normalized_price.append(float(p))
+    for p in normalized_price:
+        conn.execute(
+            text("""
+                INSERT INTO fries_prices (id, fries_id, price)
+                VALUES (:id, :fries_id, :price)
+            """),
+            {"id": str(uuid.uuid4()), "fries_id": fries_id, "price": p}
         )
     
     # Insert description
