@@ -277,8 +277,8 @@ async def create_drinks(
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO drinks (id_drinks, name, size, price, stock)
-                VALUES (:id, :name, :size, :price, :stock)
+                INSERT INTO drinks (id_drinks, name, price, stock)
+                VALUES (:id, :name, :price, :stock)
             """),
             {
                 "id": drinks_id,
