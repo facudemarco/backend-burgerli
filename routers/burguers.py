@@ -160,24 +160,11 @@ async def create_fries(
     name: str = Form(...),
     size: List[str] = Form(default=[]),
     description: List[str] = Form(default=[]),
-    price: List[float] = Form(...),
+    price: List[str] = Form(...),
     stock: bool = Form(...),
     main_image: UploadFile = File(..., description="Main image")
 ):
     fries_id = str(uuid.uuid4())
-    with engine.begin() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO fries (id_fries, name, price, stock)
-                VALUES (:id, :name, :price, :stock)
-            """),
-            {
-                "id": fries_id,
-                "name": name,
-                "price": price,
-                "stock": stock,
-            },
-        )
     
     # Insert size
     normalized_size = []
@@ -186,16 +173,6 @@ async def create_fries(
             normalized_size.extend([item.strip() for item in d.split(",") if item.strip()])
         elif d:
             normalized_size.append(d.strip())
-    for d in normalized_size:
-        if not d:
-            continue
-        conn.execute(
-            text("""
-                INSERT INTO fries_size (id, fries_id, size)
-                VALUES (:id, :fries_id, :size)
-            """),
-            {"id": str(uuid.uuid4()), "fries_id": fries_id, "size": d}
-        )
     
     # Insert prices
     normalized_price = []
@@ -204,14 +181,6 @@ async def create_fries(
             normalized_price.extend([float(item.strip()) for item in p.split(",") if item.strip()])
         elif p:
             normalized_price.append(float(p))
-    for p in normalized_price:
-        conn.execute(
-            text("""
-                INSERT INTO fries_prices (id, fries_id, price)
-                VALUES (:id, :fries_id, :price)
-            """),
-            {"id": str(uuid.uuid4()), "fries_id": fries_id, "price": p}
-        )
     
     # Insert description
     normalized_description = []
@@ -220,16 +189,6 @@ async def create_fries(
             normalized_description.extend([item.strip() for item in d.split(",") if item.strip()])
         elif d:
             normalized_description.append(d.strip())
-    for d in normalized_description:
-        if not d:
-            continue
-        conn.execute(
-            text("""
-                INSERT INTO fries_description (id, fries_id, description)
-                VALUES (:id, :fries_id, :description)
-            """),
-            {"id": str(uuid.uuid4()), "fries_id": fries_id, "description": d}
-        )
 
     if not os.path.exists(IMAGES_DIR):
         os.makedirs(IMAGES_DIR, exist_ok=True)
@@ -239,11 +198,57 @@ async def create_fries(
     with open(path, "wb") as buf:
         shutil.copyfileobj(main_image.file, buf)
     url_main = f"{DOMAIN_URL}/{fname}"
+    
+    # All database operations in a single transaction
     with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO fries (id_fries, name, stock)
+                VALUES (:id, :name, :stock)
+            """),
+            {
+                "id": fries_id,
+                "name": name,
+                "stock": stock,
+            },
+        )
+        
+        for d in normalized_size:
+            if not d:
+                continue
+            conn.execute(
+                text("""
+                    INSERT INTO fries_size (id, fries_id, size)
+                    VALUES (:id, :fries_id, :size)
+                """),
+                {"id": str(uuid.uuid4()), "fries_id": fries_id, "size": d}
+            )
+        
+        for p in normalized_price:
+            conn.execute(
+                text("""
+                    INSERT INTO fries_prices (id, fries_id, price)
+                    VALUES (:id, :fries_id, :price)
+                """),
+                {"id": str(uuid.uuid4()), "fries_id": fries_id, "price": p}
+            )
+        
+        for d in normalized_description:
+            if not d:
+                continue
+            conn.execute(
+                text("""
+                    INSERT INTO fries_description (id, fries_id, description)
+                    VALUES (:id, :fries_id, :description)
+                """),
+                {"id": str(uuid.uuid4()), "fries_id": fries_id, "description": d}
+            )
+        
         conn.execute(
             text("INSERT INTO fries_main_imgs (id, fries_id, url) VALUES (:id, :fries_id, :url)"),
             {"id": str(uuid.uuid4()), "fries_id": fries_id, "url": url_main}
         )
+    
     return {"message": "Fries created", "id": fries_id, "main_image_url": url_main}
 
 @router.get("/fries", tags=["Food"])
@@ -255,8 +260,8 @@ def get_fries():
             if not rows:
                 raise HTTPException(status_code=404, detail="No fries found.")
             fries = []
-            for fries in rows:
-                hid = fries["id_fries"]
+            for fries_row in rows:
+                hid = fries_row["id_fries"]
                 main = conn.execute(
                     text("SELECT url FROM fries_main_imgs WHERE fries_id = :id"),
                     {"id": hid}
@@ -272,7 +277,7 @@ def get_fries():
                     {"id": hid}
                 ).scalars().all()
 
-                data = dict(fries)
+                data = dict(fries_row)
                 data["main_image"] = main[0] if main else None
                 data["size_list"] = size_list
                 data["description_list"] = description_list
@@ -348,6 +353,25 @@ async def create_drinks(
     main_image: UploadFile = File(..., description="Main image")
 ):
     drinks_id = str(uuid.uuid4())
+    
+    # Insert size
+    normalized_size = []
+    for d in size:
+        if isinstance(d, str) and "," in d:
+            normalized_size.extend([item.strip() for item in d.split(",") if item.strip()])
+        elif d:
+            normalized_size.append(d.strip())
+
+    if not os.path.exists(IMAGES_DIR):
+        os.makedirs(IMAGES_DIR, exist_ok=True)
+    ext = os.path.splitext(main_image.filename or "file.jpg")[1]
+    fname = f"{uuid.uuid4()}{ext}"
+    path = os.path.join(IMAGES_DIR, fname)
+    with open(path, "wb") as buf:
+        shutil.copyfileobj(main_image.file, buf)
+    url_main = f"{DOMAIN_URL}/{fname}"
+    
+    # All database operations in a single transaction
     with engine.begin() as conn:
         conn.execute(
             text("""
@@ -361,38 +385,23 @@ async def create_drinks(
                 "stock": stock,
             },
         )
-    
-    # Insert size
-    normalized_size = []
-    for d in size:
-        if isinstance(d, str) and "," in d:
-            normalized_size.extend([item.strip() for item in d.split(",") if item.strip()])
-        elif d:
-            normalized_size.append(d.strip())
-    for d in normalized_size:
-        if not d:
-            continue
-        conn.execute(
-            text("""
-                INSERT INTO drinks_size (id, drinks_id, size)
-                VALUES (:id, :drinks_id, :size)
-            """),
-            {"id": str(uuid.uuid4()), "drinks_id": drinks_id, "size": d}
-        )
+        
+        for d in normalized_size:
+            if not d:
+                continue
+            conn.execute(
+                text("""
+                    INSERT INTO drinks_size (id, drinks_id, size)
+                    VALUES (:id, :drinks_id, :size)
+                """),
+                {"id": str(uuid.uuid4()), "drinks_id": drinks_id, "size": d}
+            )
 
-    if not os.path.exists(IMAGES_DIR):
-        os.makedirs(IMAGES_DIR, exist_ok=True)
-    ext = os.path.splitext(main_image.filename or "file.jpg")[1]
-    fname = f"{uuid.uuid4()}{ext}"
-    path = os.path.join(IMAGES_DIR, fname)
-    with open(path, "wb") as buf:
-        shutil.copyfileobj(main_image.file, buf)
-    url_main = f"{DOMAIN_URL}/{fname}"
-    with engine.begin() as conn:
         conn.execute(
             text("INSERT INTO drinks_main_imgs (id, drinks_id, url) VALUES (:id, :drinks_id, :url)"),
             {"id": str(uuid.uuid4()), "drinks_id": drinks_id, "url": url_main}
         )
+    
     return {"message": "Drinks created", "id": drinks_id, "main_image_url": url_main}
 
 @router.get("/drinks", tags=["Food"])
@@ -404,8 +413,8 @@ def get_drinks():
             if not rows:
                 raise HTTPException(status_code=404, detail="No drinks found.")
             drinks = []
-            for drinks in rows:
-                hid = drinks["id_drinks"]
+            for drinks_row in rows:
+                hid = drinks_row["id_drinks"]
                 main = conn.execute(
                     text("SELECT url FROM drinks_main_imgs WHERE drinks_id = :id"),
                     {"id": hid}
@@ -416,7 +425,7 @@ def get_drinks():
                     {"id": hid}
                 ).scalars().all()
 
-                data = dict(drinks)
+                data = dict(drinks_row)
                 data["main_image"] = main[0] if main else None
                 data["size_list"] = size_list
                 drinks.append(data)

@@ -12,6 +12,7 @@ from enum import Enum
 from pydantic import BaseModel
 import time
 from routers.testingWebSocket import manager
+import json
 
 router = APIRouter()
 
@@ -47,14 +48,6 @@ async def create_order(order: OrderMan):
         coupon = order.coupon
         products = order.products or []
 
-
-        normalized_products = []
-        for product in products:
-            if isinstance(product, str) and "," in product:
-                normalized_products.extend([p.strip() for p in product.split(",") if p.strip()])
-            elif product:
-                normalized_products.append(product.strip())
-
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
@@ -74,16 +67,34 @@ async def create_order(order: OrderMan):
                 "address": address
             })
 
-            # Products insertion
-            for product_id in normalized_products:
+             # Insert products (cada producto es un dict -> JSON string)
+            for product in products:
                 id_order_products = str(uuid.uuid4())
-                conn.execute(text("""
-                    INSERT INTO order_products (id, products, order_id) VALUES (:id, :products, :order_id)
-                """), {
-                    "id": id_order_products,
-                    "products": product_id,
-                    "order_id": id_order
-                })
+
+                # Si es string: convertir a dict (asumir que es JSON)
+                # Si es dict: usar tal cual
+                # Si es Pydantic model: usar model_dump()
+                if isinstance(product, str):
+                    try:
+                        payload = json.loads(product)
+                    except:
+                        payload = {"raw": product}
+                elif isinstance(product, dict):
+                    payload = product
+                else:
+                    payload = product.model_dump()
+
+                conn.execute(
+                    text("""
+                        INSERT INTO order_products (id, products, order_id)
+                        VALUES (:id, :products, :order_id)
+                    """),
+                    {
+                        "id": id_order_products,
+                        "products": json.dumps(payload, ensure_ascii=False),
+                        "order_id": id_order,
+                    }
+                )
             
             # Coupon insertion 
             if coupon:
