@@ -9,7 +9,7 @@ from routers.paymentController import router as payment_router
 from fastapi.staticfiles import StaticFiles
 from routers.favorites import router as favorites_router
 
-app = FastAPI(root_path="/api")
+app = FastAPI(root_path="/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api")
 
 
 origins = [
@@ -22,6 +22,8 @@ origins = [
     "https://facudemarco.github.io",
     "https://api-burgerli.iwebtecnology.com",
     "http://localhost:5500",
+    "https://burgerli.com.ar",
+    "https://burgerli.ar",
 ]
 
 app.add_middleware( 
@@ -34,7 +36,7 @@ app.add_middleware(
 )
 
 IMAGES_DIR = os.path.join(os.getcwd(), "images")
-app.mount("/api/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
+app.mount("/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 IS_PROD = os.getenv("ENV") == "production"
 print(IS_PROD)
