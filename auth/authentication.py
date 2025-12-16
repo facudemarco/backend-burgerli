@@ -11,7 +11,7 @@ from models.user import User
 
 SECRET_KEY = "MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Burgerli"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 10080
 
 class WSAuthError(Exception):
     def __init__(self, code: int = 1008, reason: str = ""):
