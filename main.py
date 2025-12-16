@@ -36,7 +36,7 @@ app.add_middleware(
 )
 
 IMAGES_DIR = os.path.join(os.getcwd(), "images")
-app.mount("/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
+app.mount("/images", StaticFiles(directory=str(IMAGES_DIR)), name="images")
 
 IS_PROD = os.getenv("ENV") == "production"
 print(IS_PROD)
