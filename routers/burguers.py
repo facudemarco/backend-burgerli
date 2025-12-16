@@ -11,7 +11,7 @@ from pathlib import Path
 router = APIRouter()
 
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "/home/iweb/burgerli/data/images"))
-DOMAIN_URL = "https://burgerli.com.ar/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api/images"
+DOMAIN_URL = "https://burgerli.com.ar/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Burgerli/api/images"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
@@ -276,11 +276,17 @@ def get_fries():
                     text("SELECT description FROM fries_description WHERE fries_id = :id"),
                     {"id": hid}
                 ).scalars().all()
+                
+                price_list = conn.execute(
+                    text("SELECT price FROM fries_prices WHERE fries_id = :id"),
+                    {"id": hid}
+                ).scalars().all()
 
                 data = dict(fries_row)
                 data["main_image"] = main[0] if main else None
                 data["size_list"] = size_list
                 data["description_list"] = description_list
+                data["price_list"] = price_list
                 fries.append(data)
             return fries
     except Exception as e:
