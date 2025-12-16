@@ -11,7 +11,7 @@ from pathlib import Path
 router = APIRouter()
 
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", "/home/iweb/burgerli/data/images"))
-DOMAIN_URL = "https://api-burgerli.iwebtecnology.com/api/images"
+DOMAIN_URL = "https://burgerli.com.ar/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api/images"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
