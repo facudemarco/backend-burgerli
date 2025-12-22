@@ -1,10 +1,12 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Form, Body, UploadFile, File
+from pydantic import BaseModel
 import os
 import shutil
 from sqlalchemy import text
 from Database.getConnection import engine
 import uuid
+import main
 from models.users_client import UserCreate, UserUpdate, FavouriteCreate, FavouriteToggleRequest
 from pathlib import Path
 
@@ -15,6 +17,17 @@ DOMAIN_URL = "https://burgerli.com.ar/MdpuF8KsXiRArNlHtl6pXO2XyLSJMTQ8_Burgerli/
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
+
+
+class UpdateBurgerRequest(BaseModel):
+    name : Optional[str] = None
+    price : Optional[float] = None
+    stock : Optional[bool] = None
+    description : Optional[str] = None
+    fries: Optional[str] = None
+    main_image: Optional[str] = None
+    size : Optional[List[str]] = None
+    ingredients : Optional[List[str]] = None
 
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
@@ -108,8 +121,8 @@ def get_burgers():
             burgers = []
             for row in result:
                 data = dict(row)
-                data["size_list"] = data.pop("sizes", "").split(",") if data.get("sizes") else []
-                data["ingredients_list"] = data.pop("ingredients", "").split(",") if data.get("ingredients") else []
+                data["size"] = data.pop("sizes", "").split(",") if data.get("sizes") else []
+                data["ingredients"] = data.pop("ingredients", "").split(",") if data.get("ingredients") else []
                 burgers.append(data)
 
             return burgers
@@ -117,6 +130,57 @@ def get_burgers():
     except Exception as e:
         # Agregar log del error
         print(f"Error getting burgers: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update_burger/{id_burger}", tags=["Food"])
+async def update_burger(
+    id_burger: str,
+    burger_data: UpdateBurgerRequest,
+):
+    try:
+        with engine.begin() as conn:
+            update_fields = {}
+            if burger_data.price is not None:
+                update_fields["price"] = burger_data.price
+            if burger_data.stock is not None:
+                update_fields["stock"] = burger_data.stock
+            if burger_data.name is not None:
+                update_fields["name"] = burger_data.name
+            if burger_data.description is not None:
+                update_fields["description"] = burger_data.description
+
+            if update_fields:
+                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
+                update_fields["id_burger"] = id_burger
+                conn.execute(
+                    text(f"UPDATE burger SET {set_clause} WHERE id_burger = :id_burger"),
+                    update_fields
+                )
+
+            if burger_data.size is not None:
+                conn.execute(
+                    text("DELETE FROM burger_size WHERE burger_id = :id_burger"),
+                    {"id_burger": id_burger}
+                )
+                for s in burger_data.size:
+                    conn.execute(
+                        text("INSERT INTO burger_size (id, burger_id, size) VALUES (:id, :burger_id, :size)"),
+                        {"id": str(uuid.uuid4()), "burger_id": id_burger, "size": s}
+                    )
+
+            if burger_data.ingredients is not None:
+                conn.execute(
+                    text("DELETE FROM burger_ingredients WHERE burger_id = :id_burger"),
+                    {"id_burger": id_burger}
+                )
+                for ing in burger_data.ingredients:
+                    conn.execute(
+                        text("INSERT INTO burger_ingredients (id, burger_id, ingredients) VALUES (:id, :burger_id, :ingredients)"),
+                        {"id": str(uuid.uuid4()), "burger_id": id_burger, "ingredients": ing}
+                    )
+
+        return {"message": "Burger updated successfully", "id_burger": id_burger}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/delete_burgers/{id_burger}", tags=["Food"])
