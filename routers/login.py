@@ -264,7 +264,7 @@ async def register(user: User):
             status_code=400,
             detail="Username already registered"
         )
-    success = create_user(user.username, user.password)
+    success = create_user(user.username, user.password, user.rol, user.local)
     if not success:
         raise HTTPException(
             status_code=500,

@@ -76,7 +76,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
         return True
     return False
 
-def create_user(username: str, password: str) -> bool:
+def create_user(username: str, password: str, rol: str = "user", local: str = "default") -> bool:
     """
     Crea un nuevo usuario en la base de datos
     """
@@ -92,7 +92,7 @@ def create_user(username: str, password: str) -> bool:
             return False
         
         # Crear nuevo usuario
-        new_user = UserDB(id=generated_id, username=username, password=password)
+        new_user = UserDB(id=generated_id, username=username, password=password, rol=rol, local=local)
         db.add(new_user)
         db.commit()
         return True
