@@ -511,79 +511,87 @@ def get_combos():
 @router.post("/promos", tags=["Combos & Promos"])
 async def create_promo(
     name: str = Form(...),
+    day: str = Form(...),
     quantity: int = Form(...),
     price: float = Form(...),
-    burgers: str = Form(...),
-    fries: str = Form(...),
-    drinks: str = Form(...)
+    image: UploadFile = File(..., description="Promo image"),
+    
 ):
     promo_id = str(uuid.uuid4())
-
-    def _split_csv(value: str):
-        return [x.strip() for x in value.split(",") if x.strip()]
 
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO promos (id_promos, name, quantity, price)
-                VALUES (:id, :name, :quantity, :price)
+                INSERT INTO promos (id_promos, name, day, quantity, price)
+                VALUES (:id, :name, :day, :quantity, :price)
             """),
-            {"id": promo_id, "name": name, "quantity": quantity, "price": price},
+            {"id": promo_id, "name": name, "day": day, "quantity": quantity, "price": price},
         )
-
-        for b in _split_csv(burgers):
-            conn.execute(
-                text("""
-                    INSERT INTO promo_burger (id_promo_burger, id_promo, id_burger)
-                    VALUES (:id, :promo, :burger)
-                """),
-                {"id": str(uuid.uuid4()), "promo": promo_id, "burger": b},
-            )
-
-        for f in _split_csv(fries):
-            conn.execute(
-                text("""
-                    INSERT INTO promo_fries (id_promo_fries, id_promo, id_fries)
-                    VALUES (:id, :promo, :fries)
-                """),
-                {"id": str(uuid.uuid4()), "promo": promo_id, "fries": f},
-            )
-
-        for d in _split_csv(drinks):
-            conn.execute(
-                text("""
-                    INSERT INTO promo_drinks (id_promo_drinks, id_promo, id_drinks)
-                    VALUES (:id, :promo, :drinks)
-                """),
-                {"id": str(uuid.uuid4()), "promo": promo_id, "drinks": d},
-            )
+    
+    if not os.path.exists(IMAGES_DIR):
+        os.makedirs(IMAGES_DIR, exist_ok=True)
+    ext = os.path.splitext(image.filename or "file.jpg")[1]
+    fname = f"{uuid.uuid4()}{ext}"
+    path = os.path.join(IMAGES_DIR, fname)
+    with open(path, "wb") as buf:
+        shutil.copyfileobj(image.file, buf)
+    url_image = f"{DOMAIN_URL}/{fname}"
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO promos_imgs (id, promo_id, url) VALUES (:id, :promo_id, :url)"),
+            {"id": str(uuid.uuid4()), "promo_id": promo_id, "url": url_image}
+        )
+    
+    
 
     return {"message": "Promo created", "id": promo_id}
 
 @router.get("/promos", tags=["Combos & Promos"])
 def get_promos():
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT p.*, pb.id_burger, pf.id_fries, pd.id_drinks
-                    FROM promos p
-                    LEFT JOIN promo_burger pb ON pb.id_promo = p.id_promos
-                    LEFT JOIN promo_fries pf ON pf.id_promo = p.id_promos
-                    LEFT JOIN promo_drinks pd ON pd.id_promo = p.id_promos
-                """)
-            ).mappings().all()
-        return result
+        with engine.begin() as conn:
+            result = conn.execute(text("SELECT * FROM promos"))
+            rows = result.mappings().all()
+            if not rows:
+                raise HTTPException(status_code=404, detail="No promos found.")
+            promos = []
+            for promo in rows:
+                hid = promo["id_promos"]
+                images = conn.execute(
+                    text("SELECT url FROM promos_imgs WHERE promo_id = :id"),
+                    {"id": hid}
+                ).scalars().all()
+                data = dict(promo)
+                data["images"] = images
+                promos.append(data)
+            return promos
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+@router.delete("/delete_promos/{id_promos}", tags=["Combos & Promos"])
+def delete_promo(id_promos: str):
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM promos_imgs WHERE promo_id = :id_promos"),
+                {"id_promos": id_promos},
+            )
+            
             result = conn.execute(
                 text("""
-                    SELECT * FROM orders
-                     """)
-            ).mappings().all()
-        return result
+                    DELETE FROM promos
+                    WHERE id_promos = :id_promos
+                """),
+                {"id_promos": id_promos},
+            )
+            if os.path.exists(IMAGES_DIR):
+                for u in os.listdir(IMAGES_DIR):
+                    if u.startswith(id_promos):
+                        os.remove(os.path.join(IMAGES_DIR, u))
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Promo not found")
+
+            return {"message": "Promo with your images deleted succesfully", "id_promos": id_promos}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
