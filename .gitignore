@@ -4,3 +4,6 @@ node_modules
 images/
 _pycache_/
 *.pyc
+TEST_BURGUERS_README.md
+test_burguers.py
+inspect_db.py

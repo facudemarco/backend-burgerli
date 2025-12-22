@@ -29,6 +29,36 @@ class UpdateBurgerRequest(BaseModel):
     size : Optional[List[str]] = None
     ingredients : Optional[List[str]] = None
 
+class UpdateFriesRequest(BaseModel):
+    name : Optional[str] = None
+    stock : Optional[bool] = None
+    size : Optional[List[str]] = None
+    description : Optional[List[str]] = None
+    price : Optional[List[float]] = None
+    main_image: Optional[str] = None
+
+class UpdateDrinksRequest(BaseModel):
+    name : Optional[str] = None
+    price : Optional[float] = None
+    stock : Optional[bool] = None
+    size : Optional[List[str]] = None
+    main_image: Optional[str] = None
+
+class UpdateComboRequest(BaseModel):
+    name : Optional[str] = None
+    quantity : Optional[int] = None
+    price : Optional[float] = None
+    burgers : Optional[str] = None
+    fries : Optional[str] = None
+    drinks : Optional[str] = None
+
+class UpdatePromoRequest(BaseModel):
+    name : Optional[str] = None
+    day : Optional[str] = None
+    quantity : Optional[int] = None
+    price : Optional[float] = None
+    image: Optional[str] = None
+
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
     price: str = Form(...),
@@ -315,6 +345,104 @@ async def create_fries(
     
     return {"message": "Fries created", "id": fries_id, "main_image_url": url_main}
 
+@router.put("/update_fries/{id_fries}", tags=["Food"])
+async def update_fries(
+    id_fries: str,
+    fries_data: UpdateFriesRequest,
+):
+    try:
+        with engine.begin() as conn:
+            update_fields = {}
+            if fries_data.name is not None:
+                update_fields["name"] = fries_data.name
+            if fries_data.stock is not None:
+                update_fields["stock"] = fries_data.stock
+
+            if update_fields:
+                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
+                update_fields["id_fries"] = id_fries
+                conn.execute(
+                    text(f"UPDATE fries SET {set_clause} WHERE id_fries = :id_fries"),
+                    update_fields
+                )
+
+            if fries_data.size is not None:
+                conn.execute(
+                    text("DELETE FROM fries_size WHERE fries_id = :id_fries"),
+                    {"id_fries": id_fries}
+                )
+                for s in fries_data.size:
+                    conn.execute(
+                        text("INSERT INTO fries_size (id, fries_id, size) VALUES (:id, :fries_id, :size)"),
+                        {"id": str(uuid.uuid4()), "fries_id": id_fries, "size": s}
+                    )
+
+            if fries_data.description is not None:
+                conn.execute(
+                    text("DELETE FROM fries_description WHERE fries_id = :id_fries"),
+                    {"id_fries": id_fries}
+                )
+                for d in fries_data.description:
+                    conn.execute(
+                        text("INSERT INTO fries_description (id, fries_id, description) VALUES (:id, :fries_id, :description)"),
+                        {"id": str(uuid.uuid4()), "fries_id": id_fries, "description": d}
+                    )
+
+            if fries_data.price is not None:
+                conn.execute(
+                    text("DELETE FROM fries_prices WHERE fries_id = :id_fries"),
+                    {"id_fries": id_fries}
+                )
+                for p in fries_data.price:
+                    conn.execute(
+                        text("INSERT INTO fries_prices (id, fries_id, price) VALUES (:id, :fries_id, :price)"),
+                        {"id": str(uuid.uuid4()), "fries_id": id_fries, "price": p}
+                    )
+
+        return {"message": "Fries updated successfully", "id_fries": id_fries}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_fries/{id_fries}", tags=["Food"])
+def delete_fries(id_fries: str):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM fries_main_imgs WHERE fries_id = :id_fries"),
+                {"id_fries": id_fries},
+            )
+            conn.execute(
+                text("DELETE FROM fries_size WHERE fries_id = :id_fries"),
+                {"id_fries": id_fries},
+            )
+            conn.execute(
+                text("DELETE FROM fries_description WHERE fries_id = :id_fries"),
+                {"id_fries": id_fries},
+            )
+            conn.execute(
+                text("DELETE FROM fries_prices WHERE fries_id = :id_fries"),
+                {"id_fries": id_fries},
+            )
+            
+            result = conn.execute(
+                text("""
+                    DELETE FROM fries
+                    WHERE id_fries = :id_fries
+                """),
+                {"id_fries": id_fries},
+            )
+            if os.path.exists(IMAGES_DIR):
+                for u in os.listdir(IMAGES_DIR):
+                    if u.startswith(id_fries):
+                        os.remove(os.path.join(IMAGES_DIR, u))
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Fries not found")
+
+            return {"message": "Fries with your images, size, description and prices deleted succesfully", "id_fries": id_fries}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/fries", tags=["Food"])
 def get_fries():
     try:
@@ -474,6 +602,76 @@ async def create_drinks(
     
     return {"message": "Drinks created", "id": drinks_id, "main_image_url": url_main}
 
+@router.put("/update_drinks/{id_drinks}", tags=["Food"])
+async def update_drinks(
+    id_drinks: str,
+    drinks_data: UpdateDrinksRequest,
+):
+    try:
+        with engine.begin() as conn:
+            update_fields = {}
+            if drinks_data.name is not None:
+                update_fields["name"] = drinks_data.name
+            if drinks_data.price is not None:
+                update_fields["price"] = drinks_data.price
+            if drinks_data.stock is not None:
+                update_fields["stock"] = drinks_data.stock
+
+            if update_fields:
+                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
+                update_fields["id_drinks"] = id_drinks
+                conn.execute(
+                    text(f"UPDATE drinks SET {set_clause} WHERE id_drinks = :id_drinks"),
+                    update_fields
+                )
+
+            if drinks_data.size is not None:
+                conn.execute(
+                    text("DELETE FROM drinks_size WHERE drinks_id = :id_drinks"),
+                    {"id_drinks": id_drinks}
+                )
+                for s in drinks_data.size:
+                    conn.execute(
+                        text("INSERT INTO drinks_size (id, drinks_id, size) VALUES (:id, :drinks_id, :size)"),
+                        {"id": str(uuid.uuid4()), "drinks_id": id_drinks, "size": s}
+                    )
+
+        return {"message": "Drinks updated successfully", "id_drinks": id_drinks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_drinks/{id_drinks}", tags=["Food"])
+def delete_drinks(id_drinks: str):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM drinks_main_imgs WHERE drinks_id = :id_drinks"),
+                {"id_drinks": id_drinks},
+            )
+            conn.execute(
+                text("DELETE FROM drinks_size WHERE drinks_id = :id_drinks"),
+                {"id_drinks": id_drinks},
+            )
+            
+            result = conn.execute(
+                text("""
+                    DELETE FROM drinks
+                    WHERE id_drinks = :id_drinks
+                """),
+                {"id_drinks": id_drinks},
+            )
+            if os.path.exists(IMAGES_DIR):
+                for u in os.listdir(IMAGES_DIR):
+                    if u.startswith(id_drinks):
+                        os.remove(os.path.join(IMAGES_DIR, u))
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Drinks not found")
+
+            return {"message": "Drinks with your images and size deleted succesfully", "id_drinks": id_drinks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/drinks", tags=["Food"])
 def get_drinks():
     try:
@@ -555,6 +753,98 @@ async def create_combo(
 
     return {"message": "Combo created", "id": combo_id}
 
+@router.put("/update_combos/{id_combos}", tags=["Combos & Promos"])
+async def update_combos(
+    combo_id: str,
+    combo_data: UpdateComboRequest,
+):
+    try:
+        with engine.begin() as conn:
+            update_fields = {}
+            if combo_data.name is not None:
+                update_fields["name"] = combo_data.name
+            if combo_data.quantity is not None:
+                update_fields["quantity"] = combo_data.quantity
+            if combo_data.price is not None:
+                update_fields["price"] = combo_data.price
+
+            if update_fields:
+                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
+                update_fields["id_combos"] = combo_id
+                conn.execute(
+                    text(f"UPDATE combos SET {set_clause} WHERE id_combos = :id_combos"),
+                    update_fields
+                )
+
+            if combo_data.burgers is not None:
+                conn.execute(
+                    text("DELETE FROM combo_burger WHERE id_combo = :id_combos"),
+                    {"id_combos": combo_id}
+                )
+                for b in combo_data.burgers.split(","):
+                    conn.execute(
+                        text("INSERT INTO combo_burger (id_combo_burger, id_combo, id_burger) VALUES (:id, :combo, :burger)"),
+                        {"id": str(uuid.uuid4()), "combo": combo_id, "burger": b.strip()}
+                    )
+
+            if combo_data.fries is not None:
+                conn.execute(
+                    text("DELETE FROM combo_fries WHERE id_combo = :id_combos"),
+                    {"id_combos": combo_id}
+                )
+                for f in combo_data.fries.split(","):
+                    conn.execute(
+                        text("INSERT INTO combo_fries (id_combo_fries, id_combo, id_fries) VALUES (:id, :combo, :fries)"),
+                        {"id": str(uuid.uuid4()), "combo": combo_id, "fries": f.strip()}
+                    )
+
+            if combo_data.drinks is not None:
+                conn.execute(
+                    text("DELETE FROM combo_drinks WHERE id_combo = :id_combos"),
+                    {"id_combos": combo_id}
+                )
+                for d in combo_data.drinks.split(","):
+                    conn.execute(
+                        text("INSERT INTO combo_drinks (id_combo_drinks, id_combo, id_drinks) VALUES (:id, :combo, :drinks)"),
+                        {"id": str(uuid.uuid4()), "combo": combo_id, "drinks": d.strip()}
+                    )
+
+        return {"message": "Combo updated successfully", "id_combos": combo_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_combos/{id_combos}", tags=["Combos & Promos"])
+def delete_combo(id_combos: str):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM combo_burger WHERE id_combo = :id_combos"),
+                {"id_combos": id_combos},
+            )
+            conn.execute(
+                text("DELETE FROM combo_fries WHERE id_combo = :id_combos"),
+                {"id_combos": id_combos},
+            )
+            conn.execute(
+                text("DELETE FROM combo_drinks WHERE id_combo = :id_combos"),
+                {"id_combos": id_combos},
+            )
+            
+            result = conn.execute(
+                text("""
+                    DELETE FROM combos
+                    WHERE id_combos = :id_combos
+                """),
+                {"id_combos": id_combos},
+            )
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Combo not found")
+
+            return {"message": "Combo deleted succesfully", "id_combos": id_combos}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/combos", tags=["Combos & Promos"])
 def get_combos():
     try:
@@ -578,8 +868,7 @@ async def create_promo(
     day: str = Form(...),
     quantity: int = Form(...),
     price: float = Form(...),
-    image: UploadFile = File(..., description="Promo image"),
-    
+    image: UploadFile = File(..., description="Promo image"),  
 ):
     promo_id = str(uuid.uuid4())
 
@@ -609,6 +898,35 @@ async def create_promo(
     
 
     return {"message": "Promo created", "id": promo_id}
+
+@router.put("/update_promos/{id_promos}", tags=["Combos & Promos"])
+async def update_promos(
+    promo_id: str,
+    promo_data: UpdatePromoRequest,
+):
+    try:
+        with engine.begin() as conn:
+            update_fields = {}
+            if promo_data.name is not None:
+                update_fields["name"] = promo_data.name
+            if promo_data.day is not None:
+                update_fields["day"] = promo_data.day
+            if promo_data.quantity is not None:
+                update_fields["quantity"] = promo_data.quantity
+            if promo_data.price is not None:
+                update_fields["price"] = promo_data.price
+
+            if update_fields:
+                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
+                update_fields["id_promos"] = promo_id
+                conn.execute(
+                    text(f"UPDATE promos SET {set_clause} WHERE id_promos = :id_promos"),
+                    update_fields
+                )
+
+        return {"message": "Promo updated successfully", "id_promos": promo_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/promos", tags=["Combos & Promos"])
 def get_promos():
