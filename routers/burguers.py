@@ -866,7 +866,7 @@ def get_combos():
 @router.post("/promos", tags=["Combos & Promos"])
 async def create_promo(
     name: str = Form(...),
-    day: str = Form(...),
+    description: str = Form(...),
     quantity: int = Form(...),
     price: float = Form(...),
     image: UploadFile = File(..., description="Promo image"),
@@ -885,10 +885,10 @@ async def create_promo(
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO promos (id_promos, name, day, quantity, price)
-                VALUES (:id, :name, :day, :quantity, :price)
+                INSERT INTO promos (id_promos, name, description, quantity, price)
+                VALUES (:id, :name, :description, :quantity, :price)
             """),
-            {"id": promo_id, "name": name, "day": day, "quantity": quantity, "price": price},
+            {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price},
         )
         
         for desc in normalized_description:
