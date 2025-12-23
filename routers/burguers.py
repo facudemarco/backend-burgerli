@@ -58,6 +58,7 @@ class UpdatePromoRequest(BaseModel):
     quantity : Optional[int] = None
     price : Optional[float] = None
     image: Optional[str] = None
+    description_list: Optional[List[str]] = None
 
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
@@ -868,9 +869,18 @@ async def create_promo(
     day: str = Form(...),
     quantity: int = Form(...),
     price: float = Form(...),
-    image: UploadFile = File(..., description="Promo image"),  
+    image: UploadFile = File(..., description="Promo image"),
+    description_list: List[str] = Form(default=[]),  
 ):
     promo_id = str(uuid.uuid4())
+
+    # Insert description_list
+    normalized_description = []
+    for d in description_list:
+        if isinstance(d, str) and "," in d:
+            normalized_description.extend([item.strip() for item in d.split(",") if item.strip()])
+        elif d:
+            normalized_description.append(d.strip())
 
     with engine.begin() as conn:
         conn.execute(
@@ -880,7 +890,18 @@ async def create_promo(
             """),
             {"id": promo_id, "name": name, "day": day, "quantity": quantity, "price": price},
         )
-    
+        
+        for desc in normalized_description:
+            if not desc:
+                continue
+            conn.execute(
+                text("""
+                    INSERT INTO promos_description (id, promo_id, description)
+                    VALUES (:id, :promo_id, :description)
+                """),
+                {"id": str(uuid.uuid4()), "promo_id": promo_id, "description": desc}
+            )
+
     if not os.path.exists(IMAGES_DIR):
         os.makedirs(IMAGES_DIR, exist_ok=True)
     ext = os.path.splitext(image.filename or "file.jpg")[1]
@@ -915,6 +936,18 @@ async def update_promos(
                 update_fields["quantity"] = promo_data.quantity
             if promo_data.price is not None:
                 update_fields["price"] = promo_data.price
+            if promo_data.description_list is not None:
+                conn.execute(
+                    text("DELETE FROM promos_description WHERE promo_id = :promo_id"),
+                    {"promo_id": promo_id}
+                )
+                for desc in promo_data.description_list:
+                    if not desc:
+                        continue
+                    conn.execute(
+                        text("INSERT INTO promos_description (id, promo_id, description) VALUES (:id, :promo_id, :description)"),
+                        {"id": str(uuid.uuid4()), "promo_id": promo_id, "description": desc}
+                    )
 
             if update_fields:
                 set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
@@ -943,8 +976,15 @@ def get_promos():
                     text("SELECT url FROM promos_imgs WHERE promo_id = :id"),
                     {"id": hid}
                 ).scalars().all()
+                
+                description_list = conn.execute(
+                    text("SELECT description FROM promos_description WHERE promo_id = :id"),
+                    {"id": hid}
+                ).scalars().all()
+                
                 data = dict(promo)
                 data["images"] = images
+                data["description_list"] = description_list
                 promos.append(data)
             return promos
     except Exception as e:
@@ -958,7 +998,10 @@ def delete_promo(id_promos: str):
                 text("DELETE FROM promos_imgs WHERE promo_id = :id_promos"),
                 {"id_promos": id_promos},
             )
-            
+            conn.execute(
+                text("DELETE FROM promos_description WHERE promo_id = :promo_id"),
+                {"promo_id": id_promos}
+            )
             result = conn.execute(
                 text("""
                     DELETE FROM promos
