@@ -298,7 +298,7 @@ async def login_for_access_token(
             httponly=True,
             secure=True,
             samesite="none",
-            max_age=3600,
+            max_age=60 * 60 * 24 * 7,
             # domain="localhost" if IS_LOCAL else "api-burgerli.iwebtecnology.com",  # <--- CORREGIDO
             path="/",
         )
@@ -329,7 +329,7 @@ async def login_user_client_for_access_token(
             httponly=True,
             secure=True,
             samesite="none",
-            max_age=3600,
+            max_age=60 * 60 * 24 * 7,
             path="/",
         )
         return response

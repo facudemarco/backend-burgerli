@@ -205,6 +205,67 @@ VALID_TRANSITIONS = {
     "delivered": set(),
 }
 
+@router.get("/getOrdersByLocalStatusConfirmed/{local}", tags=["Orders"])
+async def get_orders_by_local_status_confirmed(local: str):
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT * FROM orders WHERE local = :local AND status = 'confirmed'"),
+                {"local": local},
+            )
+
+            orders = []
+            for row in result.mappings().all():
+                order_id = row['id_order']
+                prod_result = conn.execute(
+                    text("SELECT products FROM order_products WHERE order_id = :order_id"),
+                    {"order_id": order_id},
+                )
+                product_list = [prod_row['products'] for prod_row in prod_result.mappings().all()]
+                row = dict(row)
+                row['products'] = product_list
+                orders.append(row)
+
+            return orders
+
+    except OperationalError as e:
+        print(f"Database connection error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+
+@router.get("/getOrdersByLocalStatus/{local}/{status}", tags=["Orders"])
+async def get_orders_by_local_status(local: str, status: str):
+    allowed_statuses = ["confirmed", "in_preparation", "on_the_way"]
+    if status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400, 
+            detail=f'El estado debe ser uno de: {", ".join(allowed_statuses)}'
+        )
+    
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT * FROM orders WHERE local = :local AND status = :status ORDER BY id_order DESC"),
+                {"local": local, "status": status},
+            )
+
+            orders = []
+            for row in result.mappings().all():
+                order_id = row['id_order']
+                prod_result = conn.execute(
+                    text("SELECT products FROM order_products WHERE order_id = :order_id"),
+                    {"order_id": order_id},
+                )
+                product_list = [prod_row['products'] for prod_row in prod_result.mappings().all()]
+                row = dict(row)
+                row['products'] = product_list
+                orders.append(row)
+
+            return orders
+
+    except OperationalError as e:
+        print(f"Database connection error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+
 class StatusUpdate(BaseModel):
     status: OrderStatus
 
