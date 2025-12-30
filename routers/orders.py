@@ -13,6 +13,7 @@ from pydantic import BaseModel
 import time
 from routers.testingWebSocket import manager
 import json
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -25,8 +26,8 @@ IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
 @router.post("/createOrder", tags=["Orders"])
 async def create_order(order: OrderMan):
     try:
+        now = datetime.now(timezone.utc).isoformat()
         id_order = str(uuid.uuid4())
-        # Validar que user_client_id sea un UUID válido
         user_client_id = None
         if order.user_client_id:
             try:
@@ -39,6 +40,7 @@ async def create_order(order: OrderMan):
         delivery_mode = order.delivery_mode
         price = order.price
         status = "confirmed"
+        created_at = now
         local = order.local
         order_notes = order.order_notes
         name = order.name
@@ -115,6 +117,7 @@ async def create_order(order: OrderMan):
                     "id_order": id_order,
                     "user_client_id": user_client_id,
                     "payment_method": payment_method,
+                    'created_at': created_at,
                     "delivery_mode": delivery_mode,
                     "price": price,
                     "status": status, 
@@ -136,7 +139,7 @@ async def create_order(order: OrderMan):
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
-    
+
 @router.get("/getOrders", tags=["Orders"])
 async def get_orders():
     try:
