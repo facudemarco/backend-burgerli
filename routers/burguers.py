@@ -60,6 +60,9 @@ class UpdatePromoRequest(BaseModel):
     image: Optional[str] = None
     description_list: Optional[List[str]] = None
 
+class ToggleProductStockRequest(BaseModel):
+    has_stock: bool
+
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
     price: str = Form(...),
@@ -105,6 +108,15 @@ async def create_burger(
             {"id": burger_id, "name": name, "price": price, "stock": stock, "description": description},
         )
 
+        conn.execute(
+            text("""
+                INSERT INTO burger_stock (id, burger_id, local_id, has_stock)
+                SELECT UUID(), :burger_id, l.id, :has_stock
+                FROM locals l
+            """),
+            {"burger_id": burger_id, "has_stock": stock},
+        )
+        
         # Sizes
         for s in normalized_size:
             conn.execute(
@@ -131,35 +143,53 @@ async def create_burger(
 def get_burgers():
     try:
         with engine.begin() as conn:
-            result = conn.execute(
+            rows = conn.execute(
                 text("""
-                    SELECT 
-                        b.*,
-                        bmi.url as main_image,
-                        GROUP_CONCAT(DISTINCT bs.size) as sizes,
-                        GROUP_CONCAT(DISTINCT bi.ingredients) as ingredients
+                    SELECT
+                        b.id_burger,
+                        b.name,
+                        b.price,
+                        b.stock,
+                        b.description,
+                        bmi.url AS main_image,
+                        GROUP_CONCAT(DISTINCT bs.size) AS sizes,
+                        GROUP_CONCAT(DISTINCT bi.ingredients) AS ingredients,
+                        l.name AS local_name,
+                        COALESCE(bst.has_stock, 1) AS local_stock
                     FROM burger b
                     LEFT JOIN burger_main_imgs bmi ON bmi.burger_id = b.id_burger
-                    LEFT JOIN burger_size bs ON bs.burger_id = b.id_burger 
+                    LEFT JOIN burger_size bs ON bs.burger_id = b.id_burger
                     LEFT JOIN burger_ingredients bi ON bi.burger_id = b.id_burger
-                    GROUP BY b.id_burger
+                    LEFT JOIN burger_stock bst ON bst.burger_id = b.id_burger
+                    LEFT JOIN locals l ON l.id = bst.local_id
+                    GROUP BY b.id_burger, l.id
                 """)
             ).mappings().all()
 
-            if not result:
-                raise HTTPException(status_code=404, detail="No burgers found.")
+        burgers_map = {}
 
-            burgers = []
-            for row in result:
-                data = dict(row)
-                data["size"] = data.pop("sizes", "").split(",") if data.get("sizes") else []
-                data["ingredients"] = data.pop("ingredients", "").split(",") if data.get("ingredients") else []
-                burgers.append(data)
+        for row in rows:
+            bid = row["id_burger"]
 
-            return burgers
+            if bid not in burgers_map:
+                burgers_map[bid] = {
+                    "id_burger": bid,
+                    "name": row["name"],
+                    "price": row["price"],
+                    "stock": bool(row["stock"]),
+                    "description": row["description"],
+                    "main_image": row["main_image"],
+                    "size": row["sizes"].split(",") if row["sizes"] else [],
+                    "ingredients": row["ingredients"].split(",") if row["ingredients"] else [],
+                    "stock_by_local": {}
+                }
+
+            if row["local_name"]:
+                burgers_map[bid]["stock_by_local"][row["local_name"]] = bool(row["local_stock"])
+
+        return list(burgers_map.values())
 
     except Exception as e:
-        # Agregar log del error
         print(f"Error getting burgers: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -214,6 +244,43 @@ async def update_burger(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/burgers/{id_burger}/stock/{local_id}", tags=["Food"])
+def toggle_burger_stock(id_burger: str, local_id: str, payload: ToggleProductStockRequest):
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("""
+                    UPDATE burger_stock
+                    SET has_stock = :has_stock
+                    WHERE burger_id = :burger_id AND local_id = :local_id
+                """),
+                {"has_stock": payload.has_stock, "burger_id": id_burger, "local_id": local_id},
+            )
+
+            if result.rowcount == 0:
+                conn.execute(
+                    text("""
+                        INSERT INTO burger_stock (id, burger_id, local_id, has_stock)
+                        VALUES (:id, :burger_id, :local_id, :has_stock)
+                    """),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "burger_id": id_burger,
+                        "local_id": local_id,
+                        "has_stock": payload.has_stock,
+                    },
+                )
+
+        return {
+            "message": "Burger stock updated for local",
+            "burger_id": id_burger,
+            "local_id": local_id,
+            "has_stock": payload.has_stock,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.delete("/delete_burgers/{id_burger}", tags=["Food"])
 def delete_burger(id_burger: str):
     try:
@@ -228,6 +295,11 @@ def delete_burger(id_burger: str):
             )
             conn.execute(
                 text("DELETE FROM burger_ingredients WHERE burger_id = :id_burger"),
+                {"id_burger": id_burger},
+            )
+            
+            conn.execute(
+                text("DELETE FROM burger_stock WHERE burger_id = :id_burger"),
                 {"id_burger": id_burger},
             )
             
@@ -306,6 +378,15 @@ async def create_fries(
                 "name": name,
                 "stock": stock,
             },
+        )
+        
+        conn.execute(
+            text("""
+                INSERT INTO fries_stock (id, fries_id, local_id, has_stock)
+                SELECT UUID(), :fries_id, l.id, :has_stock
+                FROM locals l
+            """),
+            {"fries_id": fries_id, "has_stock": stock},
         )
         
         for d in normalized_size:
@@ -404,6 +485,18 @@ async def update_fries(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/fries/{id_fries}/stock/{local_id}", tags=["Food"])
+def toggle_fries_stock(id_fries: str, local_id: str, payload: ToggleProductStockRequest):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE fries_stock SET has_stock = :has_stock WHERE fries_id = :id_fries AND local_id = :local_id"),
+                {"has_stock": payload.has_stock, "id_fries": id_fries, "local_id": local_id}
+            )
+        return {"message": "Fries stock toggled successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.delete("/delete_fries/{id_fries}", tags=["Food"])
 def delete_fries(id_fries: str):
     try:
@@ -422,6 +515,11 @@ def delete_fries(id_fries: str):
             )
             conn.execute(
                 text("DELETE FROM fries_prices WHERE fries_id = :id_fries"),
+                {"id_fries": id_fries},
+            )
+            
+            conn.execute(
+                text("DELETE FROM fries_stock WHERE fries_id = :id_fries"),
                 {"id_fries": id_fries},
             )
             
@@ -448,98 +546,65 @@ def delete_fries(id_fries: str):
 def get_fries():
     try:
         with engine.begin() as conn:
-            result = conn.execute(text("SELECT * FROM fries"))
-            rows = result.mappings().all()
+            rows = conn.execute(
+                text("""
+                    SELECT
+                        f.*,
+                        l.name AS local_name,
+                        COALESCE(fs.has_stock, 1) AS local_stock
+                    FROM fries f
+                    LEFT JOIN fries_stock fs ON fs.fries_id = f.id_fries
+                    LEFT JOIN locals l ON l.id = fs.local_id
+                    ORDER BY f.id_fries
+                """)
+            ).mappings().all()
+
             if not rows:
                 raise HTTPException(status_code=404, detail="No fries found.")
-            fries = []
-            for fries_row in rows:
-                hid = fries_row["id_fries"]
-                main = conn.execute(
-                    text("SELECT url FROM fries_main_imgs WHERE fries_id = :id"),
-                    {"id": hid}
-                ).fetchone()
 
-                size_list = conn.execute(
-                    text("SELECT size FROM fries_size WHERE fries_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
+            fries_map = {}
 
-                description_list = conn.execute(
-                    text("SELECT description FROM fries_description WHERE fries_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
-                
-                price_list = conn.execute(
-                    text("SELECT price FROM fries_prices WHERE fries_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
+            for row in rows:
+                fid = row["id_fries"]
 
-                data = dict(fries_row)
-                data["main_image"] = main[0] if main else None
-                data["size_list"] = size_list
-                data["description_list"] = description_list
-                data["price_list"] = price_list
-                fries.append(data)
-            return fries
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                if fid not in fries_map:
+                    main = conn.execute(
+                        text("SELECT url FROM fries_main_imgs WHERE fries_id = :id"),
+                        {"id": fid}
+                    ).fetchone()
 
-@router.post("/dips", tags=["Food"])
-async def create_dip(
-    name: str = Form(...),
-    image: UploadFile = File(..., description="Dip image"),
-    stock: bool = Form(...),
-    price: float = Form(...)
-):
-    dip_id = str(uuid.uuid4())
-    with engine.begin() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO dips (id_dips, name, stock, price)
-                VALUES (:id, :name, :stock, :price)
-            """),
-            {
-                "id": dip_id,
-                "name": name,
-                "stock": stock,
-                "price": price
-            }
-        )
-    if not os.path.exists(IMAGES_DIR):
-        os.makedirs(IMAGES_DIR, exist_ok=True)
-    ext = os.path.splitext(image.filename or "file.jpg")[1]
-    fname = f"{uuid.uuid4()}{ext}"
-    path = os.path.join(IMAGES_DIR, fname)
-    with open(path, "wb") as buf:
-        shutil.copyfileobj(image.file, buf)
-    url_image = f"{DOMAIN_URL}/{fname}"
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO dips_imgs (id, dips_id, url) VALUES (:id, :dips_id, :url)"),
-            {"id": str(uuid.uuid4()), "dips_id": dip_id, "url": url_image}
-        )
-    return {"message": "Dip created", "id": dip_id}
+                    size_list = conn.execute(
+                        text("SELECT size FROM fries_size WHERE fries_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
 
-@router.get("/dips", tags=["Food"])
-def get_dips():
-    try:
-        with engine.begin() as conn:
-            result = conn.execute(text("SELECT * FROM dips"))
-            rows = result.mappings().all()
-            if not rows:
-                raise HTTPException(status_code=404, detail="No dips found.")
-            dips = []
-            for dip in rows:
-                hid = dip["id_dips"]
-                images = conn.execute(
-                    text("SELECT url FROM dips_imgs WHERE dips_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
-                data = dict(dip)
-                data["images"] = images
-                dips.append(data)
-            return dips
+                    description_list = conn.execute(
+                        text("SELECT description FROM fries_description WHERE fries_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
+
+                    price_list = conn.execute(
+                        text("SELECT price FROM fries_prices WHERE fries_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
+
+                    data = dict(row)
+                    data.pop("local_name", None)
+                    data.pop("local_stock", None)
+
+                    data["main_image"] = main[0] if main else None
+                    data["size_list"] = size_list
+                    data["description_list"] = description_list
+                    data["price_list"] = price_list
+                    data["stock_by_local"] = {}
+
+                    fries_map[fid] = data
+
+                if row["local_name"]:
+                    fries_map[fid]["stock_by_local"][row["local_name"]] = bool(row["local_stock"])
+
+            return list(fries_map.values())
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -583,6 +648,15 @@ async def create_drinks(
                 "price": price,
                 "stock": stock,
             },
+        )
+        
+        conn.execute(
+            text("""
+                INSERT INTO drinks_stock (id, drinks_id, local_id, has_stock)
+                SELECT UUID(), :drinks_id, l.id, :has_stock
+                FROM locals l
+            """),
+            {"drinks_id": drinks_id, "has_stock": stock},
         )
         
         for d in normalized_size:
@@ -641,6 +715,18 @@ async def update_drinks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/drinks/{id_drinks}/stock/{local_id}", tags=["Food"])
+def toggle_drinks_stock(id_drinks: str, local_id: str, payload: ToggleProductStockRequest):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE drinks_stock SET has_stock = :has_stock WHERE drinks_id = :id_drinks AND local_id = :local_id"),
+                {"has_stock": payload.has_stock, "id_drinks": id_drinks, "local_id": local_id}
+            )
+        return {"message": "Drinks stock toggled successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.delete("/delete_drinks/{id_drinks}", tags=["Food"])
 def delete_drinks(id_drinks: str):
     try:
@@ -677,189 +763,64 @@ def delete_drinks(id_drinks: str):
 def get_drinks():
     try:
         with engine.begin() as conn:
-            result = conn.execute(text("SELECT * FROM drinks"))
-            rows = result.mappings().all()
-            if not rows:
-                raise HTTPException(status_code=404, detail="No drinks found.")
-            drinks = []
-            for drinks_row in rows:
-                hid = drinks_row["id_drinks"]
-                main = conn.execute(
-                    text("SELECT url FROM drinks_main_imgs WHERE drinks_id = :id"),
-                    {"id": hid}
-                ).fetchone()
-
-                size_list = conn.execute(
-                    text("SELECT size FROM drinks_size WHERE drinks_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
-
-                data = dict(drinks_row)
-                data["main_image"] = main[0] if main else None
-                data["size_list"] = size_list
-                drinks.append(data)
-            return drinks
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/combos", tags=["Combos & Promos"])
-async def create_combo(
-    name: str = Form(...),
-    quantity: int = Form(...),
-    price: float = Form(...),
-    burgers: str = Form(...),
-    fries: str = Form(...),
-    drinks: str = Form(...)
-):
-    combo_id = str(uuid.uuid4())
-
-    def _split_csv(value: str):
-        return [x.strip() for x in value.split(",") if x.strip()]
-
-    with engine.begin() as conn:
-        conn.execute(
-            text("""
-                INSERT INTO combos (id_combos, name, quantity, price)
-                VALUES (:id, :name, :quantity, :price)
-            """),
-            {"id": combo_id, "name": name, "quantity": quantity, "price": price},
-        )
-
-        for b in _split_csv(burgers):
-            conn.execute(
+            rows = conn.execute(
                 text("""
-                    INSERT INTO combo_burger (id_combo_burger, id_combo, id_burger)
-                    VALUES (:id, :combo, :burger)
-                """),
-                {"id": str(uuid.uuid4()), "combo": combo_id, "burger": b},
-            )
-
-        for f in _split_csv(fries):
-            conn.execute(
-                text("""
-                    INSERT INTO combo_fries (id_combo_fries, id_combo, id_fries)
-                    VALUES (:id, :combo, :fries)
-                """),
-                {"id": str(uuid.uuid4()), "combo": combo_id, "fries": f},
-            )
-
-        for d in _split_csv(drinks):
-            conn.execute(
-                text("""
-                    INSERT INTO combo_drinks (id_combo_drinks, id_combo, id_drinks)
-                    VALUES (:id, :combo, :drinks)
-                """),
-                {"id": str(uuid.uuid4()), "combo": combo_id, "drinks": d},
-            )
-
-    return {"message": "Combo created", "id": combo_id}
-
-@router.put("/update_combos/{id_combos}", tags=["Combos & Promos"])
-async def update_combos(
-    combo_id: str,
-    combo_data: UpdateComboRequest,
-):
-    try:
-        with engine.begin() as conn:
-            update_fields = {}
-            if combo_data.name is not None:
-                update_fields["name"] = combo_data.name
-            if combo_data.quantity is not None:
-                update_fields["quantity"] = combo_data.quantity
-            if combo_data.price is not None:
-                update_fields["price"] = combo_data.price
-
-            if update_fields:
-                set_clause = ", ".join([f"{key} = :{key}" for key in update_fields.keys()])
-                update_fields["id_combos"] = combo_id
-                conn.execute(
-                    text(f"UPDATE combos SET {set_clause} WHERE id_combos = :id_combos"),
-                    update_fields
-                )
-
-            if combo_data.burgers is not None:
-                conn.execute(
-                    text("DELETE FROM combo_burger WHERE id_combo = :id_combos"),
-                    {"id_combos": combo_id}
-                )
-                for b in combo_data.burgers.split(","):
-                    conn.execute(
-                        text("INSERT INTO combo_burger (id_combo_burger, id_combo, id_burger) VALUES (:id, :combo, :burger)"),
-                        {"id": str(uuid.uuid4()), "combo": combo_id, "burger": b.strip()}
-                    )
-
-            if combo_data.fries is not None:
-                conn.execute(
-                    text("DELETE FROM combo_fries WHERE id_combo = :id_combos"),
-                    {"id_combos": combo_id}
-                )
-                for f in combo_data.fries.split(","):
-                    conn.execute(
-                        text("INSERT INTO combo_fries (id_combo_fries, id_combo, id_fries) VALUES (:id, :combo, :fries)"),
-                        {"id": str(uuid.uuid4()), "combo": combo_id, "fries": f.strip()}
-                    )
-
-            if combo_data.drinks is not None:
-                conn.execute(
-                    text("DELETE FROM combo_drinks WHERE id_combo = :id_combos"),
-                    {"id_combos": combo_id}
-                )
-                for d in combo_data.drinks.split(","):
-                    conn.execute(
-                        text("INSERT INTO combo_drinks (id_combo_drinks, id_combo, id_drinks) VALUES (:id, :combo, :drinks)"),
-                        {"id": str(uuid.uuid4()), "combo": combo_id, "drinks": d.strip()}
-                    )
-
-        return {"message": "Combo updated successfully", "id_combos": combo_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/delete_combos/{id_combos}", tags=["Combos & Promos"])
-def delete_combo(id_combos: str):
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM combo_burger WHERE id_combo = :id_combos"),
-                {"id_combos": id_combos},
-            )
-            conn.execute(
-                text("DELETE FROM combo_fries WHERE id_combo = :id_combos"),
-                {"id_combos": id_combos},
-            )
-            conn.execute(
-                text("DELETE FROM combo_drinks WHERE id_combo = :id_combos"),
-                {"id_combos": id_combos},
-            )
-            
-            result = conn.execute(
-                text("""
-                    DELETE FROM combos
-                    WHERE id_combos = :id_combos
-                """),
-                {"id_combos": id_combos},
-            )
-            
-            if result.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Combo not found")
-
-            return {"message": "Combo deleted succesfully", "id_combos": id_combos}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/combos", tags=["Combos & Promos"])
-def get_combos():
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT c.*, cb.id_burger, cf.id_fries, cd.id_drinks
-                    FROM combos c
-                    LEFT JOIN combo_burger cb ON cb.id_combo = c.id_combos
-                    LEFT JOIN combo_fries cf ON cf.id_combo = c.id_combos
-                    LEFT JOIN combo_drinks cd ON cd.id_combo = c.id_combos
+                    SELECT
+                        f.*,
+                        l.name AS local_name,
+                        COALESCE(fs.has_stock, 1) AS local_stock
+                    FROM drinks f
+                    LEFT JOIN drinks_stock fs ON fs.drinks_id = f.id_drinks
+                    LEFT JOIN locals l ON l.id = fs.local_id
+                    ORDER BY f.id_drinks
                 """)
             ).mappings().all()
-        return result
+
+            if not rows:
+                raise HTTPException(status_code=404, detail="No drinks found.")
+
+            drinks_map = {}
+
+            for row in rows:
+                fid = row["id_drinks"]
+
+                if fid not in drinks_map:
+                    main = conn.execute(
+                        text("SELECT url FROM drinks_main_imgs WHERE drinks_id = :id"),
+                        {"id": fid}
+                    ).fetchone()
+
+                    size_list = conn.execute(
+                        text("SELECT size FROM drinks_size WHERE drinks_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
+
+                    description_list = conn.execute(
+                        text("SELECT description FROM drinks_description WHERE drinks_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
+
+                    price_list = conn.execute(
+                        text("SELECT price FROM drinks_prices WHERE drinks_id = :id"),
+                        {"id": fid}
+                    ).scalars().all()
+
+                    data = dict(row)
+                    data.pop("local_name", None)
+                    data.pop("local_stock", None)
+
+                    data["main_image"] = main[0] if main else None
+                    data["size_list"] = size_list
+                    data["description_list"] = description_list
+                    data["price_list"] = price_list
+                    data["stock_by_local"] = {}
+
+                    drinks_map[fid] = data
+
+                if row["local_name"]:
+                    drinks_map[fid]["stock_by_local"][row["local_name"]] = bool(row["local_stock"])
+
+            return list(drinks_map.values())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -891,6 +852,15 @@ async def create_promo(
             {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price},
         )
         
+        conn.execute(
+            text("""
+                INSERT INTO promos_stock (id, promo_id, local_id, has_stock)
+                SELECT UUID(), :promo_id, l.id, 1
+                FROM locals l
+            """),
+            {"promo_id": promo_id}
+        )
+
         for desc in normalized_description:
             if not desc:
                 continue
@@ -961,32 +931,68 @@ async def update_promos(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/promos/{id_promos}/stock/{local_id}", tags=["Combos & Promos"])
+def toggle_promo_stock(id_promos: str, local_id: str, payload: ToggleProductStockRequest):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE promos_stock SET has_stock = :has_stock WHERE promo_id = :id_promos AND local_id = :local_id"),
+                {"has_stock": payload.has_stock, "id_promos": id_promos, "local_id": local_id}
+            )
+        return {"message": "Promo stock toggled successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/promos", tags=["Combos & Promos"])
 def get_promos():
     try:
         with engine.begin() as conn:
-            result = conn.execute(text("SELECT * FROM promos"))
-            rows = result.mappings().all()
+            rows = conn.execute(
+                text("""
+                    SELECT
+                        p.*,
+                        l.name AS local_name,
+                        COALESCE(ps.has_stock, 1) AS local_stock
+                    FROM promos p
+                    LEFT JOIN promos_stock ps ON ps.promo_id = p.id_promos
+                    LEFT JOIN locals l ON l.id = ps.local_id
+                    ORDER BY p.id_promos
+                """)
+            ).mappings().all()
+
             if not rows:
                 raise HTTPException(status_code=404, detail="No promos found.")
-            promos = []
-            for promo in rows:
-                hid = promo["id_promos"]
-                images = conn.execute(
-                    text("SELECT url FROM promos_imgs WHERE promo_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
-                
-                description_list = conn.execute(
-                    text("SELECT description FROM promos_description WHERE promo_id = :id"),
-                    {"id": hid}
-                ).scalars().all()
-                
-                data = dict(promo)
-                data["images"] = images
-                data["description_list"] = description_list
-                promos.append(data)
-            return promos
+
+            promos_map = {}
+
+            for row in rows:
+                pid = row["id_promos"]
+
+                if pid not in promos_map:
+                    img = conn.execute(
+                        text("SELECT url FROM promos_imgs WHERE promo_id = :id"),
+                        {"id": pid}
+                    ).fetchone()
+
+                    description_list = conn.execute(
+                        text("SELECT description FROM promos_description WHERE promo_id = :id"),
+                        {"id": pid}
+                    ).scalars().all()
+
+                    data = dict(row)
+                    data.pop("local_name", None)
+                    data.pop("local_stock", None)
+
+                    data["image"] = img[0] if img else None
+                    data["description_list"] = description_list
+                    data["stock_by_local"] = {}
+
+                    promos_map[pid] = data
+
+                if row["local_name"]:
+                    promos_map[pid]["stock_by_local"][row["local_name"]] = bool(row["local_stock"])
+
+            return list(promos_map.values())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -1001,6 +1007,10 @@ def delete_promo(id_promos: str):
             conn.execute(
                 text("DELETE FROM promos_description WHERE promo_id = :promo_id"),
                 {"promo_id": id_promos}
+            )
+            conn.execute(
+                text("DELETE FROM promos_stock WHERE promo_id = :id_promos"),
+                {"id_promos": id_promos},
             )
             result = conn.execute(
                 text("""
