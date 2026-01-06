@@ -1,6 +1,7 @@
+from email.mime import image
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Form, Body, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 import shutil
 from sqlalchemy import text
@@ -32,19 +33,17 @@ class UpdateBurgerRequest(BaseModel):
 class UpdateFriesRequest(BaseModel):
     name : Optional[str] = None
     stock : Optional[bool] = None
-    size : Optional[List[str]] = None
-    description : Optional[List[str]] = None
-    price : Optional[List[float]] = None
+    size_list : Optional[List[str]] = None
+    description_list : Optional[List[str]] = None
+    price_list : Optional[List[float]] = Field(default_factory=list)
     main_image: Optional[str] = None
 
 class UpdateDrinksRequest(BaseModel):
     name : Optional[str] = None
     price : Optional[float] = None
     stock : Optional[bool] = None
-    size : Optional[List[str]] = None
+    size_list : Optional[List[str]] = None
     main_image: Optional[str] = None
-
-class UpdateComboRequest(BaseModel):
     name : Optional[str] = None
     quantity : Optional[int] = None
     price : Optional[float] = None
@@ -54,11 +53,12 @@ class UpdateComboRequest(BaseModel):
 
 class UpdatePromoRequest(BaseModel):
     name : Optional[str] = None
-    day : Optional[str] = None
+    description : Optional[str] = None
     quantity : Optional[int] = None
     price : Optional[float] = None
+    stock : Optional[bool] = None
     image: Optional[str] = None
-    description_list: Optional[List[str]] = None
+    description_list : Optional[List[str]] = None
 
 class ToggleProductStockRequest(BaseModel):
     has_stock: bool
@@ -327,7 +327,7 @@ async def create_fries(
     name: str = Form(...),
     size: List[str] = Form(default=[]),
     description: List[str] = Form(default=[]),
-    price: List[str] = Form(...),
+    price: List[float] = Form(...),
     stock: bool = Form(...),
     main_image: UploadFile = File(..., description="Main image")
 ):
@@ -344,10 +344,8 @@ async def create_fries(
     # Insert prices
     normalized_price = []
     for p in price:
-        if isinstance(p, str) and "," in p:
-            normalized_price.extend([float(item.strip()) for item in p.split(",") if item.strip()])
-        elif p:
-            normalized_price.append(float(p))
+        if p:
+            normalized_price.append(p)
     
     # Insert description
     normalized_description = []
@@ -448,34 +446,34 @@ async def update_fries(
                     update_fields
                 )
 
-            if fries_data.size is not None:
+            if fries_data.size_list is not None:
                 conn.execute(
                     text("DELETE FROM fries_size WHERE fries_id = :id_fries"),
                     {"id_fries": id_fries}
                 )
-                for s in fries_data.size:
+                for s in fries_data.size_list:
                     conn.execute(
                         text("INSERT INTO fries_size (id, fries_id, size) VALUES (:id, :fries_id, :size)"),
                         {"id": str(uuid.uuid4()), "fries_id": id_fries, "size": s}
                     )
 
-            if fries_data.description is not None:
+            if fries_data.description_list is not None:
                 conn.execute(
                     text("DELETE FROM fries_description WHERE fries_id = :id_fries"),
                     {"id_fries": id_fries}
                 )
-                for d in fries_data.description:
+                for d in fries_data.description_list:
                     conn.execute(
                         text("INSERT INTO fries_description (id, fries_id, description) VALUES (:id, :fries_id, :description)"),
                         {"id": str(uuid.uuid4()), "fries_id": id_fries, "description": d}
                     )
 
-            if fries_data.price is not None:
+            if fries_data.price_list is not None:
                 conn.execute(
                     text("DELETE FROM fries_prices WHERE fries_id = :id_fries"),
                     {"id_fries": id_fries}
                 )
-                for p in fries_data.price:
+                for p in fries_data.price_list:
                     conn.execute(
                         text("INSERT INTO fries_prices (id, fries_id, price) VALUES (:id, :fries_id, :price)"),
                         {"id": str(uuid.uuid4()), "fries_id": id_fries, "price": p}
@@ -700,12 +698,12 @@ async def update_drinks(
                     update_fields
                 )
 
-            if drinks_data.size is not None:
+            if drinks_data.size_list is not None:
                 conn.execute(
                     text("DELETE FROM drinks_size WHERE drinks_id = :id_drinks"),
                     {"id_drinks": id_drinks}
                 )
-                for s in drinks_data.size:
+                for s in drinks_data.size_list:
                     conn.execute(
                         text("INSERT INTO drinks_size (id, drinks_id, size) VALUES (:id, :drinks_id, :size)"),
                         {"id": str(uuid.uuid4()), "drinks_id": id_drinks, "size": s}
@@ -795,24 +793,12 @@ def get_drinks():
                         {"id": fid}
                     ).scalars().all()
 
-                    description_list = conn.execute(
-                        text("SELECT description FROM drinks_description WHERE drinks_id = :id"),
-                        {"id": fid}
-                    ).scalars().all()
-
-                    price_list = conn.execute(
-                        text("SELECT price FROM drinks_prices WHERE drinks_id = :id"),
-                        {"id": fid}
-                    ).scalars().all()
-
                     data = dict(row)
                     data.pop("local_name", None)
                     data.pop("local_stock", None)
 
                     data["main_image"] = main[0] if main else None
                     data["size_list"] = size_list
-                    data["description_list"] = description_list
-                    data["price_list"] = price_list
                     data["stock_by_local"] = {}
 
                     drinks_map[fid] = data
@@ -824,7 +810,7 @@ def get_drinks():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/promos", tags=["Combos & Promos"])
+@router.post("/promos", tags=["Promos"])
 async def create_promo(
     name: str = Form(...),
     description: str = Form(...),
@@ -890,7 +876,7 @@ async def create_promo(
 
     return {"message": "Promo created", "id": promo_id}
 
-@router.put("/update_promos/{id_promos}", tags=["Combos & Promos"])
+@router.put("/update_promos/{id_promos}", tags=["Promos"])
 async def update_promos(
     promo_id: str,
     promo_data: UpdatePromoRequest,
@@ -900,23 +886,22 @@ async def update_promos(
             update_fields = {}
             if promo_data.name is not None:
                 update_fields["name"] = promo_data.name
-            if promo_data.day is not None:
-                update_fields["day"] = promo_data.day
+            if promo_data.description is not None:
+                update_fields["description"] = promo_data.description
             if promo_data.quantity is not None:
                 update_fields["quantity"] = promo_data.quantity
             if promo_data.price is not None:
                 update_fields["price"] = promo_data.price
+
             if promo_data.description_list is not None:
                 conn.execute(
                     text("DELETE FROM promos_description WHERE promo_id = :promo_id"),
                     {"promo_id": promo_id}
                 )
-                for desc in promo_data.description_list:
-                    if not desc:
-                        continue
+                for d in promo_data.description_list:
                     conn.execute(
                         text("INSERT INTO promos_description (id, promo_id, description) VALUES (:id, :promo_id, :description)"),
-                        {"id": str(uuid.uuid4()), "promo_id": promo_id, "description": desc}
+                        {"id": str(uuid.uuid4()), "promo_id": promo_id, "description": d}
                     )
 
             if update_fields:
@@ -931,7 +916,7 @@ async def update_promos(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.patch("/promos/{id_promos}/stock/{local_id}", tags=["Combos & Promos"])
+@router.patch("/promos/{id_promos}/stock/{local_id}", tags=["Promos"])
 def toggle_promo_stock(id_promos: str, local_id: str, payload: ToggleProductStockRequest):
     try:
         with engine.begin() as conn:
@@ -943,7 +928,7 @@ def toggle_promo_stock(id_promos: str, local_id: str, payload: ToggleProductStoc
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/promos", tags=["Combos & Promos"])
+@router.get("/promos", tags=["Promos"])
 def get_promos():
     try:
         with engine.begin() as conn:
@@ -954,7 +939,7 @@ def get_promos():
                         l.name AS local_name,
                         COALESCE(ps.has_stock, 1) AS local_stock
                     FROM promos p
-                    LEFT JOIN promos_stock ps ON ps.promo_id = p.id_promos
+                    LEFT JOIN promos_stock ps ON ps.promos_id = p.id_promos
                     LEFT JOIN locals l ON l.id = ps.local_id
                     ORDER BY p.id_promos
                 """)
@@ -996,7 +981,7 @@ def get_promos():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@router.delete("/delete_promos/{id_promos}", tags=["Combos & Promos"])
+@router.delete("/delete_promos/{id_promos}", tags=["Promos"])
 def delete_promo(id_promos: str):
     try:
         with engine.begin() as conn:
