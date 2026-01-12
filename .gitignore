@@ -10,3 +10,4 @@ inspect_db.py
 PROMOS_TESTS_SUMMARY.md
 TEST_PROMOS_README.md
 inspect_db.py
+__pycache__/

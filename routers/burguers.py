@@ -57,6 +57,7 @@ class UpdatePromoRequest(BaseModel):
     quantity : Optional[int] = None
     price : Optional[float] = None
     stock : Optional[bool] = None
+    options : Optional[int] = None
     image: Optional[str] = None
     description_list : Optional[List[str]] = None
 
@@ -816,6 +817,8 @@ async def create_promo(
     description: str = Form(...),
     quantity: int = Form(...),
     price: float = Form(...),
+    stock: bool = Form(...),
+    options: int = Form(...),
     image: UploadFile = File(..., description="Promo image"),
     description_list: List[str] = Form(default=[]),  
 ):
@@ -832,19 +835,19 @@ async def create_promo(
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO promos (id_promos, name, description, quantity, price)
-                VALUES (:id, :name, :description, :quantity, :price)
+                INSERT INTO promos (id_promos, name, description, quantity, price, options)
+                VALUES (:id, :name, :description, :quantity, :price, :options)
             """),
-            {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price},
+            {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price, "options": options},
         )
         
         conn.execute(
             text("""
                 INSERT INTO promos_stock (id, promo_id, local_id, has_stock)
-                SELECT UUID(), :promo_id, l.id, 1
+                SELECT UUID(), :promo_id, l.id, :has_stock
                 FROM locals l
             """),
-            {"promo_id": promo_id}
+            {"promo_id": promo_id, "has_stock": stock}
         )
 
         for desc in normalized_description:
@@ -892,6 +895,8 @@ async def update_promos(
                 update_fields["quantity"] = promo_data.quantity
             if promo_data.price is not None:
                 update_fields["price"] = promo_data.price
+            if promo_data.options is not None:
+                update_fields["options"] = promo_data.options
 
             if promo_data.description_list is not None:
                 conn.execute(
@@ -939,7 +944,7 @@ def get_promos():
                         l.name AS local_name,
                         COALESCE(ps.has_stock, 1) AS local_stock
                     FROM promos p
-                    LEFT JOIN promos_stock ps ON ps.promos_id = p.id_promos
+                    LEFT JOIN promos_stock ps ON ps.promo_id = p.id_promos
                     LEFT JOIN locals l ON l.id = ps.local_id
                     ORDER BY p.id_promos
                 """)
