@@ -835,10 +835,10 @@ async def create_promo(
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO promos (id_promos, name, description, quantity, price, options)
-                VALUES (:id, :name, :description, :quantity, :price, :options)
+                INSERT INTO promos (id_promos, name, description, quantity, price, stock, options)
+                VALUES (:id, :name, :description, :quantity, :price, :stock, :options)
             """),
-            {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price, "options": options},
+            {"id": promo_id, "name": name, "description": description, "quantity": quantity, "price": price, "stock": stock, "options": options},
         )
         
         conn.execute(
