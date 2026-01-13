@@ -3,8 +3,10 @@ from fastapi import APIRouter, HTTPException, Body
 from sqlalchemy import text
 from Database.getConnection import engine
 from sqlalchemy.exc import OperationalError
-from typing import Optional
-import uuid
+from typing import Optional, Dict, List 
+
+from models.locals import OpeningHoursPayload
+import json
 
 router = APIRouter()
 
@@ -78,4 +80,50 @@ async def rename_local(old_name: str, new_name: str = Body(..., embed=True)):
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
-        
+
+@router.get("/getLocal/{name}", tags=["Locals"])
+def get_local(name: str):
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT * FROM locals WHERE name = :name"),
+                {"name": name},
+            ).mappings().one_or_none()
+            if not row:
+                raise HTTPException(status_code=404, detail="Local not found")
+            return row
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.put("/updateLocalOpeningHours/{name}")
+def update_local_opening_hours(name: str, payload: OpeningHoursPayload):
+    hours_dict = {
+        day: [r.model_dump() for r in ranges]
+        for day, ranges in payload.opening_hours.items()
+    }
+
+    valid_days = {str(i) for i in range(7)}
+    if not set(hours_dict.keys()).issubset(valid_days):
+        raise HTTPException(status_code=400, detail="opening_hours keys must be '0'..'6'")
+
+    opening_hours_json = json.dumps(hours_dict, ensure_ascii=False)
+
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("""
+                UPDATE locals
+                SET opening_hours = :opening_hours
+                WHERE name = :name
+            """),
+            {"name": name, "opening_hours": opening_hours_json}
+        )
+
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail=f"Local '{name}' not found")
+
+        saved = conn.execute(
+            text("SELECT id, name, opening_hours FROM locals WHERE name = :name"),
+            {"name": name}
+        ).mappings().one()
+
+    return {"ok": True, "local": {k: v for k, v in saved.items()}}  
