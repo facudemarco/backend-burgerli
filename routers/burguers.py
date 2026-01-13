@@ -64,6 +64,10 @@ class UpdatePromoRequest(BaseModel):
 class ToggleProductStockRequest(BaseModel):
     has_stock: bool
 
+class couponRequest(BaseModel):
+    name : str
+    amount : float
+
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
     price: str = Form(...),
@@ -1018,5 +1022,59 @@ def delete_promo(id_promos: str):
                 raise HTTPException(status_code=404, detail="Promo not found")
 
             return {"message": "Promo with your images deleted succesfully", "id_promos": id_promos}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/create_coupon", tags=["Coupons"])
+async def create_coupon(coupon_data: couponRequest):
+    try:
+        coupon_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO coupons (id, name, amount) VALUES (:id, :name, :amount)"),
+                {"id": coupon_id, "name": coupon_data.name, "amount": coupon_data.amount},
+            )
+        return {"message": "Coupon created", "id": coupon_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/coupons", tags=["Coupons"])
+def get_coupons():
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text("SELECT * FROM coupons")
+            ).mappings().all()
+            if not rows:
+                raise HTTPException(status_code=404, detail="No coupons found.")
+            return list(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/coupon/{name}", tags=["Coupons"])
+def get_coupon(name: str):
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT * FROM coupons WHERE name = :name"),
+                {"name": name},
+            ).mappings().one_or_none()
+            if not row:
+                raise HTTPException(status_code=404, detail="Coupon not found")
+            return row
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_coupon/{id}", tags=["Coupons"])
+def delete_coupon(id: str):
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM coupons WHERE id = :id"),
+                {"id": id},
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Coupon not found")
+            return {"message": "Coupon deleted successfully", "id": id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
