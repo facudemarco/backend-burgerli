@@ -33,34 +33,59 @@ router = APIRouter()
 def getUsers():
     try:
         with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT * FROM user_client
-                """))
-            
+            result = conn.execute(text("SELECT * FROM user_client"))
             rows = result.mappings().all()
             if not rows:
                 raise HTTPException(status_code=404, detail="No users found")
+
             users = []
             for user in rows:
                 hid = user["id_user_client"]
+
                 address_list = conn.execute(
                     text("SELECT address FROM user_client_address WHERE user_id = :hid"),
                     {"hid": hid}
                 ).scalars().all()
 
+                # cupones asignados (nombres)
+                coupons_list = conn.execute(
+                    text("""
+                        SELECT c.name
+                        FROM user_client_coupons ucc
+                        JOIN coupons c ON c.id = ucc.coupon_id
+                        WHERE ucc.user_client_id = :hid
+                        ORDER BY c.name
+                    """),
+                    {"hid": hid}
+                ).scalars().all()
+
+                # cupones usados (nombres) (DISTINCT por si lo usó varias veces)
+                used_coupons_list = conn.execute(
+                    text("""
+                        SELECT DISTINCT c.name
+                        FROM user_client_coupon_usage u
+                        JOIN coupons c ON c.id = u.coupon_id
+                        WHERE u.user_client_id = :hid
+                        ORDER BY c.name
+                    """),
+                    {"hid": hid}
+                ).scalars().all()
+
                 data = dict(user)
                 data["addresses"] = address_list
+                data["coupons"] = coupons_list
+                data["used_coupons"] = used_coupons_list
                 users.append(data)
-        return users
+
+            return users
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) 
 
 @router.get("/get_users/{id_user_client}", tags=["Users Clients"])
 def getUserById(id_user_client: str):
     try:
         with engine.connect() as conn:
-            user = conn.execute(
+            result = conn.execute(
                 text("""
                     SELECT id_user_client, name, email, phone, password, locality, notes
                     FROM user_client
@@ -69,21 +94,48 @@ def getUserById(id_user_client: str):
                 {"id_user_client": id_user_client},
             )
 
-            rows = user.mappings().all()
+            rows = result.mappings().all()
             if not rows:
                 raise HTTPException(status_code=404, detail="No users found")
+
             users = []
             for user in rows:
                 hid = user["id_user_client"]
+
                 address_list = conn.execute(
                     text("SELECT address FROM user_client_address WHERE user_id = :hid"),
                     {"hid": hid}
                 ).scalars().all()
 
+                coupons_list = conn.execute(
+                    text("""
+                        SELECT c.name
+                        FROM user_client_coupons ucc
+                        JOIN coupons c ON c.id = ucc.coupon_id
+                        WHERE ucc.user_client_id = :hid
+                        ORDER BY c.name
+                    """),
+                    {"hid": hid}
+                ).scalars().all()
+
+                used_coupons_list = conn.execute(
+                    text("""
+                        SELECT DISTINCT c.name
+                        FROM user_client_coupon_usage u
+                        JOIN coupons c ON c.id = u.coupon_id
+                        WHERE u.user_client_id = :hid
+                        ORDER BY c.name
+                    """),
+                    {"hid": hid}
+                ).scalars().all()
+
                 data = dict(user)
                 data["addresses"] = address_list
+                data["coupons"] = coupons_list
+                data["used_coupons"] = used_coupons_list
                 users.append(data)
-        return users
+
+            return users
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

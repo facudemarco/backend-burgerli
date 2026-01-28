@@ -113,3 +113,4 @@ class OrderMan(BaseModel):
     address: Optional[str] = None
     coupon: Optional[str] = None
     products: Optional[List[str]] = None
+    coupons: Optional[List[str]] = None

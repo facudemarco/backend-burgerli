@@ -47,8 +47,8 @@ async def create_order(order: OrderMan):
         phone = order.phone
         email = order.email
         address = order.address
-        coupon = order.coupon
         products = order.products or []
+        coupons = list(dict.fromkeys(order.coupons or []))
 
         with engine.begin() as conn:
             conn.execute(text("""
@@ -98,15 +98,31 @@ async def create_order(order: OrderMan):
                     }
                 )
             
+            if len(coupons) > 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Solo se permite 1 cupón por orden."
+                )
+            
             # Coupon insertion 
-            if coupon:
+            for coupon_id in coupons:
                 id_order_coupons = str(uuid.uuid4())
+                if coupons:
+                    rows = conn.execute(
+                        text("SELECT id FROM coupons WHERE id IN :ids"),
+                        {"ids": tuple(coupons)},
+                    ).fetchall()
+
+                    if len(rows) != len(coupons):
+                        raise HTTPException(400, "Cupón inválido")
+
                 conn.execute(text("""
-                    INSERT INTO order_coupons (id_order_coupons, id_order, name) VALUES (:id_order_coupons, :id_order, :name)
+                    INSERT INTO order_coupons (id_order_coupons, id_order, coupon_id)
+                    VALUES (:id_order_coupons, :id_order, :coupon_id)
                 """), {
                     "id_order_coupons": id_order_coupons,
                     "id_order": id_order,
-                    "name": coupon
+                    "coupon_id": coupon_id
                 })
 
             # ACA VA WEBSOCKET
@@ -330,6 +346,39 @@ async def update_order_status(
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Order not found")
 
+            # Coupon update
+            if new_status == "delivered":
+                # 1) user_client_id de la orden
+                row_order = conn.execute(
+                    text("SELECT id_user_client FROM orders WHERE id_order = :id_order"),
+                    {"id_order": id_order},
+                ).mappings().first()
+
+                user_client_id = row_order["id_user_client"] if row_order else None
+
+                if user_client_id:
+                    # 2) todos los cupones aplicados a la orden
+                    rows_coupons = conn.execute(
+                        text("SELECT coupon_id FROM order_coupons WHERE id_order = :id_order"),
+                        {"id_order": id_order},
+                    ).mappings().all()
+
+                    for r in rows_coupons:
+                        usage_id = str(uuid.uuid4())
+                        conn.execute(
+                            text("""
+                                INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
+                                VALUES (:id, :user_client_id, :coupon_id, :order_id)
+                                ON DUPLICATE KEY UPDATE id = id    
+                            """),
+                            {
+                                "id": usage_id,
+                                "user_client_id": user_client_id,
+                                "coupon_id": r["coupon_id"],
+                                "order_id": id_order,
+                            },
+                        )
+
         # 5) Armar payload común para WS
         payload = {
             "event": "status_update",
@@ -355,6 +404,8 @@ async def update_order_status(
         # re-lanzo las HTTPException tal cual
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"[PATCH /orders/{id_order}/status] error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
