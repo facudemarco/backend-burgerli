@@ -9,6 +9,7 @@ from routers.paymentController import router as payment_router
 from fastapi.staticfiles import StaticFiles
 from routers.favorites import router as favorites_router
 from routers.locals import router as locals_router
+from routers.home import router as home_router
 
 app = FastAPI(root_path="/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api")
 
@@ -53,3 +54,4 @@ app.include_router(payment_router)
 app.include_router(orders_router)
 app.include_router(favorites_router)
 app.include_router(locals_router)
+app.include_router(home_router)

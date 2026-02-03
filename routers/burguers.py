@@ -68,6 +68,9 @@ class couponRequest(BaseModel):
     name : str
     amount : float
 
+class deliveryPriceRequest(BaseModel):
+    price : float
+
 @router.post("/burgers", tags=["Food"])
 async def create_burger(
     price: str = Form(...),
@@ -1076,5 +1079,57 @@ def delete_coupon(id: str):
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Coupon not found")
             return {"message": "Coupon deleted successfully", "id": id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/create_delivery_price", tags=["Delivery Price"])
+def create_delivery_price(delivery_price_data: deliveryPriceRequest):
+    try:
+        delivery_price_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO delivery_price (id, price) VALUES (:id, :price)"),
+                {"id": delivery_price_id, "price": delivery_price_data.price},
+            )
+        return {"message": "Delivery price created", "id": delivery_price_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/delivery_price", tags=["Delivery Price"])
+def get_delivery_price():
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text("SELECT * FROM delivery_price")
+            ).mappings().all()
+            if not rows:
+                raise HTTPException(status_code=404, detail="No delivery prices found.")
+            return list(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete_delivery_price/{id}", tags=["Delivery Price"])
+def delete_delivery_price(id: str):
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM delivery_price WHERE id = :id"),
+                {"id": id},
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Delivery price not found")
+            return {"message": "Delivery price deleted successfully", "id": id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/update_delivery_price/{id}", tags=["Delivery Price"])
+def update_delivery_price(id: str, delivery_price_data: deliveryPriceRequest):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE delivery_price SET price = :price WHERE id = :id"),
+                {"id": id, "price": delivery_price_data.price},
+            )
+        return {"message": "Delivery price updated successfully", "id": id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

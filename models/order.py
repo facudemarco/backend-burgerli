@@ -25,7 +25,8 @@ class Order(Base):
     fries = relationship("OrderFries", back_populates="order")
     extras = relationship("OrderExtra", back_populates="order")
     sins = relationship("OrderSin", back_populates="order")
-    coupons = relationship("OrderCoupons", back_populates="order")
+    sins = relationship("OrderSin", back_populates="order")
+    # coupons = relationship("OrderCoupons", back_populates="order")
     client = relationship("OrderUserClient", back_populates="order")
 
 class OrderBurger(Base):
@@ -78,15 +79,15 @@ class OrderSin(Base):
 
     order = relationship("Order", back_populates="sins")
 
-class OrderCoupons(Base):
-    __tablename__ = "order_coupons"
+# class OrderCoupons(Base):
+#     __tablename__ = "order_coupons"
 
-    id_order_coupons = Column(String(50), primary_key=True, index=True)
-    id_order = Column(String(50), ForeignKey("orders.id_order"))
-    # id_coupons = Column(String(50), ForeignKey("coupons.id_coupons"))
-    id_coupons = Column(String(50))
+#     id_order_coupons = Column(String(50), primary_key=True, index=True)
+#     id_order = Column(String(50), ForeignKey("orders.id_order"))
+#     # id_coupons = Column(String(50), ForeignKey("coupons.id_coupons"))
+#     id_coupons = Column(String(50))
 
-    order = relationship("Order", back_populates="coupons")
+#     order = relationship("Order", back_populates="coupons")
 
 class OrderUserClient(Base):
     __tablename__ = "order_user_client"
@@ -104,6 +105,7 @@ class OrderMan(BaseModel):
     payment_method: Optional[str] = None
     delivery_mode: Optional[str] = None
     price: Optional[float] = None
+    delivery_time: Optional[str] = None
     status: Optional[str] = None
     order_notes: Optional[str] = None
     local: Optional[str] = None
@@ -113,4 +115,3 @@ class OrderMan(BaseModel):
     address: Optional[str] = None
     coupon: Optional[str] = None
     products: Optional[List[str]] = None
-    coupons: Optional[List[str]] = None

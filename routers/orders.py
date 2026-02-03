@@ -39,6 +39,7 @@ async def create_order(order: OrderMan):
         payment_method = order.payment_method
         delivery_mode = order.delivery_mode
         price = order.price
+        delivery_time = order.delivery_time
         status = "confirmed"
         created_at = now
         local = order.local
@@ -48,25 +49,27 @@ async def create_order(order: OrderMan):
         email = order.email
         address = order.address
         products = order.products or []
-        coupons = list(dict.fromkeys(order.coupons or []))
+        coupon = order.coupon
 
         with engine.begin() as conn:
             conn.execute(text("""
-                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
-                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
+                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, delivery_time, status, order_notes, local, name, phone, email, address, coupon)
+                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :delivery_time, :status, :order_notes, :local, :name, :phone, :email, :address, :coupon)
             """), {
                 "id_order": id_order,
                 "id_user_client": user_client_id,
                 "payment_method": payment_method,
                 "delivery_mode": delivery_mode,
                 "price": price,
+                "delivery_time": delivery_time,
                 "status": status, 
                 "order_notes": order_notes,
                 "local": local,
                 "name": name,
                 "phone": phone,
                 "email": email,
-                "address": address
+                "address": address,
+                "coupon": coupon
             })
 
              # Insert products (cada producto es un dict -> JSON string)
@@ -97,33 +100,6 @@ async def create_order(order: OrderMan):
                         "order_id": id_order,
                     }
                 )
-            
-            if len(coupons) > 1:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Solo se permite 1 cupón por orden."
-                )
-            
-            # Coupon insertion 
-            for coupon_id in coupons:
-                id_order_coupons = str(uuid.uuid4())
-                if coupons:
-                    rows = conn.execute(
-                        text("SELECT id FROM coupons WHERE id IN :ids"),
-                        {"ids": tuple(coupons)},
-                    ).fetchall()
-
-                    if len(rows) != len(coupons):
-                        raise HTTPException(400, "Cupón inválido")
-
-                conn.execute(text("""
-                    INSERT INTO order_coupons (id_order_coupons, id_order, coupon_id)
-                    VALUES (:id_order_coupons, :id_order, :coupon_id)
-                """), {
-                    "id_order_coupons": id_order_coupons,
-                    "id_order": id_order,
-                    "coupon_id": coupon_id
-                })
 
             # ACA VA WEBSOCKET
                 # 2️⃣ Notificar a dashboards
@@ -136,6 +112,7 @@ async def create_order(order: OrderMan):
                     'created_at': created_at,
                     "delivery_mode": delivery_mode,
                     "price": price,
+                    "delivery_time": delivery_time,
                     "status": status, 
                     "order_notes": order_notes,
                     "local": local,
@@ -206,6 +183,51 @@ async def update_order_status_simple(id_order: str, status: str = Body(..., embe
             })
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Order not found")
+            
+            # Coupon update logic for PUT endpoint
+            if status == "delivered":
+                # 1) user_client_id de la orden
+                row_order = conn.execute(
+                    text("SELECT id_user_client FROM orders WHERE id_order = :id_order"),
+                    {"id_order": id_order},
+                ).mappings().first()
+
+                user_client_id = row_order["id_user_client"] if row_order else None
+
+                if user_client_id:
+                    # 2) obtener el coupon de la orden
+                    row_coupon = conn.execute(
+                        text("SELECT coupon FROM orders WHERE id_order = :id_order"),
+                        {"id_order": id_order},
+                    ).mappings().first()
+
+                    coupon_code = row_coupon["coupon"] if row_coupon else None
+
+                    if coupon_code:
+                        # Resolver ID del cupon usando el nombre/código
+                        row_coupon_id = conn.execute(
+                            text("SELECT id FROM coupons WHERE name = :code"),
+                            {"code": coupon_code}
+                        ).mappings().first()
+
+                        real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
+
+                        if real_coupon_id:
+                            usage_id = str(uuid.uuid4())
+                            conn.execute(
+                                text("""
+                                    INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
+                                    VALUES (:id, :user_client_id, :coupon_id, :order_id)
+                                    ON DUPLICATE KEY UPDATE id = id    
+                                """),
+                                {
+                                    "id": usage_id,
+                                    "user_client_id": user_client_id,
+                                    "coupon_id": real_coupon_id,
+                                    "order_id": id_order,
+                                },
+                            )
+
             return {"message": "Order status updated successfully"}
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
@@ -357,27 +379,38 @@ async def update_order_status(
                 user_client_id = row_order["id_user_client"] if row_order else None
 
                 if user_client_id:
-                    # 2) todos los cupones aplicados a la orden
-                    rows_coupons = conn.execute(
-                        text("SELECT coupon_id FROM order_coupons WHERE id_order = :id_order"),
+                    # 2) obtener el coupon de la orden
+                    row_coupon = conn.execute(
+                        text("SELECT coupon FROM orders WHERE id_order = :id_order"),
                         {"id_order": id_order},
-                    ).mappings().all()
+                    ).mappings().first()
 
-                    for r in rows_coupons:
-                        usage_id = str(uuid.uuid4())
-                        conn.execute(
-                            text("""
-                                INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
-                                VALUES (:id, :user_client_id, :coupon_id, :order_id)
-                                ON DUPLICATE KEY UPDATE id = id    
-                            """),
-                            {
-                                "id": usage_id,
-                                "user_client_id": user_client_id,
-                                "coupon_id": r["coupon_id"],
-                                "order_id": id_order,
-                            },
-                        )
+                    coupon_code = row_coupon["coupon"] if row_coupon else None
+
+                    if coupon_code:
+                        # Resolver ID del cupon usando el nombre/código
+                        row_coupon_id = conn.execute(
+                            text("SELECT id FROM coupons WHERE name = :code"),
+                            {"code": coupon_code}
+                        ).mappings().first()
+
+                        real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
+
+                        if real_coupon_id:
+                            usage_id = str(uuid.uuid4())
+                            conn.execute(
+                                text("""
+                                    INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
+                                    VALUES (:id, :user_client_id, :coupon_id, :order_id)
+                                    ON DUPLICATE KEY UPDATE id = id    
+                                """),
+                                {
+                                    "id": usage_id,
+                                    "user_client_id": user_client_id,
+                                    "coupon_id": real_coupon_id,
+                                    "order_id": id_order,
+                                },
+                            )
 
         # 5) Armar payload común para WS
         payload = {
@@ -420,10 +453,6 @@ async def delete_order(id_order: str):
                 {"order_id": id_order},
             )
 
-            conn.execute(
-                text("DELETE FROM order_coupons WHERE id_order = :id_order"),
-                {"id_order": id_order},
-            )
 
             # 2) Eliminar la orden
             result = conn.execute(

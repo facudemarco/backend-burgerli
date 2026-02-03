@@ -3,7 +3,7 @@ from Database.getConnection import getConnection
 
 from models.order import (
     Order, OrderBurger, OrderDrinks, OrderFries,
-    OrderExtra, OrderSin, OrderCoupons, OrderUserClient
+    OrderExtra, OrderSin, OrderUserClient
 )
 
 
@@ -25,7 +25,7 @@ def save_order_from_ws(pedido: dict):
             delivery_mode=pedido.get("delivery_mode"),
             price=pedido.get("price"),
             status=pedido.get("status", "entregado"),
-            coupon=None,  # si tenés cupones individuales abajo
+            coupon=pedido.get("coupon"),
             order_notes=pedido.get("order_notes"),
             local=pedido.get("local"),
         )
@@ -68,12 +68,6 @@ def save_order_from_ws(pedido: dict):
                 id_sin=sin_id
             ))
 
-        for coupon_id in pedido.get("coupons", []):
-            db.add(OrderCoupons(
-                id_order_coupons=str(uuid.uuid4()),
-                id_order=order_id,
-                id_coupons=coupon_id
-            ))
 
         # 3. Relación con el cliente
         db.add(OrderUserClient(
