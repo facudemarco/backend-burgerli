@@ -114,4 +114,5 @@ class OrderMan(BaseModel):
     email: Optional[str] = None
     address: Optional[str] = None
     coupon: Optional[str] = None
+    coupon_amount: Optional[float] = None
     products: Optional[List[str]] = None

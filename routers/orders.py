@@ -49,12 +49,13 @@ async def create_order(order: OrderMan):
         email = order.email
         address = order.address
         products = order.products or []
-        coupon = order.coupon
+        coupon = order.coupon.strip() if order.coupon else None
+        coupon_amount = order.coupon_amount
 
         with engine.begin() as conn:
             conn.execute(text("""
-                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, delivery_time, status, order_notes, local, name, phone, email, address, coupon)
-                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :delivery_time, :status, :order_notes, :local, :name, :phone, :email, :address, :coupon)
+                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, delivery_time, status, order_notes, local, name, phone, email, address, coupon, coupon_amount)
+                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :delivery_time, :status, :order_notes, :local, :name, :phone, :email, :address, :coupon, :coupon_amount)
             """), {
                 "id_order": id_order,
                 "id_user_client": user_client_id,
@@ -69,7 +70,8 @@ async def create_order(order: OrderMan):
                 "phone": phone,
                 "email": email,
                 "address": address,
-                "coupon": coupon
+                "coupon": coupon,
+                "coupon_amount": coupon_amount
             })
 
              # Insert products (cada producto es un dict -> JSON string)
@@ -202,15 +204,20 @@ async def update_order_status_simple(id_order: str, status: str = Body(..., embe
                     ).mappings().first()
 
                     coupon_code = row_coupon["coupon"] if row_coupon else None
+                    
+                    print(f"DEBUG: updateOrderStatus {id_order} -> delivered. User: {user_client_id}, Coupon: {coupon_code}")
 
                     if coupon_code:
-                        # Resolver ID del cupon usando el nombre/código
+                        clean_code = coupon_code.strip()
+                        # Resolver ID del cupon usando el nombre/código insensitive
+                        # MySQL collation is usually case-insensitive by default, but let's be sure
                         row_coupon_id = conn.execute(
                             text("SELECT id FROM coupons WHERE name = :code"),
-                            {"code": coupon_code}
+                            {"code": clean_code}
                         ).mappings().first()
 
                         real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
+                        print(f"DEBUG: Coupon '{clean_code}' resolved to ID: {real_coupon_id}")
 
                         if real_coupon_id:
                             usage_id = str(uuid.uuid4())
@@ -227,6 +234,7 @@ async def update_order_status_simple(id_order: str, status: str = Body(..., embe
                                     "order_id": id_order,
                                 },
                             )
+                            print(f"DEBUG: Inserted usage for user {user_client_id} and coupon {real_coupon_id}")
 
             return {"message": "Order status updated successfully"}
     except OperationalError as e:
@@ -386,15 +394,18 @@ async def update_order_status(
                     ).mappings().first()
 
                     coupon_code = row_coupon["coupon"] if row_coupon else None
+                    print(f"DEBUG: PATCH status {id_order} -> delivered. User: {user_client_id}, Coupon: {coupon_code}")
 
                     if coupon_code:
+                        clean_code = coupon_code.strip()
                         # Resolver ID del cupon usando el nombre/código
                         row_coupon_id = conn.execute(
                             text("SELECT id FROM coupons WHERE name = :code"),
-                            {"code": coupon_code}
+                            {"code": clean_code}
                         ).mappings().first()
 
                         real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
+                        print(f"DEBUG: Coupon '{clean_code}' resolved to ID: {real_coupon_id}")
 
                         if real_coupon_id:
                             usage_id = str(uuid.uuid4())
@@ -411,6 +422,7 @@ async def update_order_status(
                                     "order_id": id_order,
                                 },
                             )
+                            print(f"DEBUG: Inserted usage for user {user_client_id} and coupon {real_coupon_id}")
 
         # 5) Armar payload común para WS
         payload = {
