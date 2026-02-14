@@ -67,6 +67,8 @@ class ToggleProductStockRequest(BaseModel):
 class couponRequest(BaseModel):
     name : str
     amount : float
+    type : Optional[str] = None
+    tope : Optional[int] = None
 
 class deliveryPriceRequest(BaseModel):
     price : float
@@ -1034,8 +1036,8 @@ async def create_coupon(coupon_data: couponRequest):
         coupon_id = str(uuid.uuid4())
         with engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO coupons (id, name, amount) VALUES (:id, :name, :amount)"),
-                {"id": coupon_id, "name": coupon_data.name, "amount": coupon_data.amount},
+                text("INSERT INTO coupons (id, name, amount, type, tope) VALUES (:id, :name, :amount, :type, :tope)"),
+                {"id": coupon_id, "name": coupon_data.name, "amount": coupon_data.amount, "type": coupon_data.type, "tope": coupon_data.tope},
             )
         return {"message": "Coupon created", "id": coupon_id}
     except Exception as e:
@@ -1065,6 +1067,18 @@ def get_coupon(name: str):
             if not row:
                 raise HTTPException(status_code=404, detail="Coupon not found")
             return row
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/update_coupon/{id}", tags=["Coupons"])
+def update_coupon(id: str, coupon_data: couponRequest):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE coupons SET name = :name, amount = :amount, type = :type, tope = :tope WHERE id = :id"),
+                {"id": id, "name": coupon_data.name, "amount": coupon_data.amount, "type": coupon_data.type, "tope": coupon_data.tope},
+            )
+        return {"message": "Coupon updated successfully", "id": id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
