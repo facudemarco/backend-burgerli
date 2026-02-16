@@ -119,6 +119,8 @@ async def create_order(order: OrderMan):
                     "order_notes": order_notes,
                     "local": local,
                     "name": name,
+                    "coupon": coupon,
+                    "coupon_amount": coupon_amount,
                     "phone": phone,
                     "email": email,
                     "address": address,
