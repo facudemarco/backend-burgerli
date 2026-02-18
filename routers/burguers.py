@@ -1086,6 +1086,14 @@ def update_coupon(id: str, coupon_data: couponRequest):
 def delete_coupon(id: str):
     try:
         with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM user_client_coupon_usage WHERE coupon_id = :id"),
+                {"id": id},
+            )
+            conn.execute(
+                text("DELETE FROM user_client_coupons WHERE coupon_id = :id"),
+                {"id": id},
+            )
             result = conn.execute(
                 text("DELETE FROM coupons WHERE id = :id"),
                 {"id": id},
