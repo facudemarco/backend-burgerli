@@ -20,7 +20,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
 
 @router.post("/add_home_image", tags=["Home"])
-def add_home_image(image: UploadFile = File(...)):
+def add_home_image(image: UploadFile = File(...),
+                   type: str = Form(...)):
     try:
         id = str(uuid.uuid4())
         if not image.filename:
@@ -41,8 +42,8 @@ def add_home_image(image: UploadFile = File(...)):
         
         with engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO imgs_home (id, url) VALUES (:id, :url)"),
-                {"id": id, "url": image_url},
+                text("INSERT INTO imgs_home (id, url, type) VALUES (:id, :url, :type)"),
+                {"id": id, "url": image_url, "type": type},
             )
         
         return {"message": "Image added successfully", "id": id, "image_url": image_url}
@@ -54,9 +55,9 @@ def get_home_images():
     try:
         with engine.begin() as conn:
             rows = conn.execute(
-                text("SELECT id, url FROM imgs_home")
+                text("SELECT id, url, type FROM imgs_home")
             )
-            images = [{"id": row[0], "url": row[1]} for row in rows]
+            images = [{"id": row[0], "url": row[1], "type": row[2]} for row in rows]
         return {"images": images}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
