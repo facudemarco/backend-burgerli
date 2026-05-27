@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Optional
 import json
 
@@ -7,6 +8,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from auth.authentication import get_current_user_ws, WSAuthError
 
 router = APIRouter()
+
+
 
 
 class OrderConnectionManager:
@@ -21,6 +24,8 @@ class OrderConnectionManager:
         self.order_connections: Dict[str, List[WebSocket]] = {}
         # [WebSocket, WebSocket, ...]
         self.dashboard_connections: List[WebSocket] = []
+        # {local_id: [WebSocket, WebSocket, ...]}
+        self.local_connections: Dict[str, List[WebSocket]] = {}
 
     # ---------- TIENDA (por order_id) ----------
 
@@ -49,7 +54,9 @@ class OrderConnectionManager:
         escuchando esa order_id.
         """
         conns = self.order_connections.get(order_id)
+        print(f"[BROADCAST_ORDER] order_id={order_id}, conexiones={len(conns) if conns else 0}, total_orders={len(self.order_connections)}")
         if not conns:
+            print(f"[BROADCAST_ORDER] No hay conexiones para order_id={order_id}")
             return
 
         text = json.dumps(message)
@@ -77,6 +84,8 @@ class OrderConnectionManager:
         Envía un mensaje a TODOS los dashboards conectados.
         """
         print(f"[DEBUG] Dashboards activos: {len(self.dashboard_connections)}")
+        print(f"[BROADCAST DASHBOARDS] manager={id(self)} dashboards={len(self.dashboard_connections)}")
+        print(f"[BROADCAST DASHBOARDS] message={message}")
         text = json.dumps(message)
 
         for ws in list(self.dashboard_connections):
@@ -89,6 +98,39 @@ class OrderConnectionManager:
                 except Exception:
                     pass
                 self.disconnect_dashboard(ws)
+
+    # ---------- LOCAL (dashboards por local) ----------
+
+    async def connect_local(self, local_id: str, websocket: WebSocket) -> None:
+        """Conectar dashboard de un local específico"""
+        await websocket.accept()
+        self.local_connections.setdefault(local_id, []).append(websocket)
+        print(f"[WS] Local '{local_id}' conectado")
+
+    def disconnect_local(self, local_id: str, websocket: WebSocket) -> None:
+        """Desconectar dashboard de un local"""
+        conns = self.local_connections.get(local_id)
+        if conns and websocket in conns:
+            conns.remove(websocket)
+            if not conns:
+                self.local_connections.pop(local_id, None)
+        print(f"[WS] Local '{local_id}' desconectado")
+
+    async def broadcast_to_local(self, local_id: str, message: dict) -> None:
+        """Enviar evento solo a un local específico"""
+        conns = self.local_connections.get(local_id)
+        print(f"[BROADCAST_LOCAL] local_id={local_id}, conexiones={len(conns) if conns else 0}")
+        if not conns:
+            print(f"[BROADCAST_LOCAL] No hay conexiones para local={local_id}")
+            return
+        
+        text = json.dumps(message)
+        for ws in list(conns):
+            try:
+                await ws.send_text(text)
+            except Exception as e:
+                print(f"[WS] error broadcast local {local_id}: {e}")
+                self.disconnect_local(local_id, ws)
 
 
 manager = OrderConnectionManager()
@@ -165,7 +207,12 @@ async def websocket_dashboard(websocket: WebSocket):
     token = websocket.cookies.get("Authorization")
 
     user_id: Optional[str] = None
-
+    print(f"[WS CONNECT REAL] manager id={id(manager)}")
+    print(f"[WS CONNECT REAL] dashboards={len(manager.dashboard_connections)}")
+    print(f"[WS CONNECT REAL] orders={list(manager.order_connections.keys())}")
+    print(f"[WS CONNECT] pid={os.getpid()} manager id={id(manager)}")
+    print(f"[WS CONNECT] dashboards={len(manager.dashboard_connections)}")
+    print(f"[WS CONNECT] orders={list(manager.order_connections.keys())}")
     # Autenticación/identidad durante el handshake
     try:
         if token:
@@ -217,6 +264,31 @@ async def websocket_dashboard(websocket: WebSocket):
     except Exception as e:
         print(f"[WS DASHBOARD LOOP ERROR] {e}")
         manager.disconnect_dashboard(websocket)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+@router.websocket("/ws/local/{local_id}")
+async def websocket_local_dashboard(websocket: WebSocket, local_id: str):
+    """
+    Conexión del dashboard de un LOCAL específico.
+    Recibe eventos solo de órdenes transferidas a ese local.
+    
+    URL: ws://.../ws/local/{local_id}
+    """
+    await manager.connect_local(local_id, websocket)
+    print(f"[WS LOCAL] conectado para local_id={local_id}")
+    
+    try:
+        while True:
+            # Mantener viva la conexión, sin esperar mensajes del cliente
+            _ = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect_local(local_id, websocket)
+    except Exception as e:
+        print(f"[WS LOCAL LOOP ERROR] {e}")
+        manager.disconnect_local(local_id, websocket)
         try:
             await websocket.close(code=1011)
         except Exception:

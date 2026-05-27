@@ -1,3 +1,4 @@
+from email import message
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Form, Body, UploadFile, File
 import os
@@ -12,22 +13,23 @@ from enum import Enum
 from pydantic import BaseModel
 import time
 from routers.testingWebSocket import manager
-import json
-from datetime import datetime, timezone
 
 router = APIRouter()
 
 IMAGES_DIR = "images/"
-DOMAIN_URL = "https://burgerli.com.ar/MdpuF8KsXiRArNIHtI6pXO2XyLSJMTQ8_Burgerli/api/images"
+DOMAIN_URL = "https://api-burgerli.iwebtecnology.com/api/images"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
 
+class ChangeLocalBody(BaseModel):
+    local: str
+
 @router.post("/createOrder", tags=["Orders"])
 async def create_order(order: OrderMan):
     try:
-        now = datetime.now(timezone.utc).isoformat()
         id_order = str(uuid.uuid4())
+        # Validar que user_client_id sea un UUID válido
         user_client_id = None
         if order.user_client_id:
             try:
@@ -39,69 +41,64 @@ async def create_order(order: OrderMan):
         payment_method = order.payment_method
         delivery_mode = order.delivery_mode
         price = order.price
-        delivery_time = order.delivery_time
         status = "confirmed"
-        created_at = now
         local = order.local
         order_notes = order.order_notes
         name = order.name
         phone = order.phone
         email = order.email
         address = order.address
+        coupon = order.coupon
         products = order.products or []
-        coupon = order.coupon.strip() if order.coupon else None
-        coupon_amount = order.coupon_amount
+
+
+        normalized_products = []
+        for product in products:
+            if isinstance(product, str) and "," in product:
+                normalized_products.extend([p.strip() for p in product.split(",") if p.strip()])
+            elif product:
+                normalized_products.append(product.strip())
 
         with engine.begin() as conn:
             conn.execute(text("""
-                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, delivery_time, status, order_notes, local, name, phone, email, address, coupon, coupon_amount)
-                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :delivery_time, :status, :order_notes, :local, :name, :phone, :email, :address, :coupon, :coupon_amount)
+                INSERT INTO orders (id_order, user_client_id, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
+                VALUES (:id_order, :user_client_id, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
             """), {
                 "id_order": id_order,
-                "id_user_client": user_client_id,
+                "user_client_id": user_client_id,
                 "payment_method": payment_method,
                 "delivery_mode": delivery_mode,
                 "price": price,
-                "delivery_time": delivery_time,
                 "status": status, 
                 "order_notes": order_notes,
                 "local": local,
                 "name": name,
                 "phone": phone,
                 "email": email,
-                "address": address,
-                "coupon": coupon,
-                "coupon_amount": coupon_amount
+                "address": address
             })
 
-             # Insert products (cada producto es un dict -> JSON string)
-            for product in products:
+            # Products insertion
+            for product_id in normalized_products:
                 id_order_products = str(uuid.uuid4())
-
-                # Si es string: convertir a dict (asumir que es JSON)
-                # Si es dict: usar tal cual
-                # Si es Pydantic model: usar model_dump()
-                if isinstance(product, str):
-                    try:
-                        payload = json.loads(product)
-                    except:
-                        payload = {"raw": product}
-                elif isinstance(product, dict):
-                    payload = product
-                else:
-                    payload = product.model_dump()
-
-                conn.execute(
-                    text("""
-                        INSERT INTO order_products (id, products, order_id)
-                        VALUES (:id, :products, :order_id)
-                    """),
-                    {
-                        "id": id_order_products,
-                        "products": json.dumps(payload, ensure_ascii=False),
-                        "order_id": id_order,
-                    }
-                )
+                conn.execute(text("""
+                    INSERT INTO order_products (id, products, order_id) VALUES (:id, :products, :order_id)
+                """), {
+                    "id": id_order_products,
+                    "products": product_id,
+                    "order_id": id_order
+                })
+            
+            # Coupon insertion 
+            if coupon:
+                id_order_coupons = str(uuid.uuid4())
+                conn.execute(text("""
+                    INSERT INTO order_coupons (id_order_coupons, id_order, name) VALUES (:id_order_coupons, :id_order, :name)
+                """), {
+                    "id_order_coupons": id_order_coupons,
+                    "id_order": id_order,
+                    "name": coupon
+                })
 
             # ACA VA WEBSOCKET
                 # 2️⃣ Notificar a dashboards
@@ -111,16 +108,12 @@ async def create_order(order: OrderMan):
                     "id_order": id_order,
                     "user_client_id": user_client_id,
                     "payment_method": payment_method,
-                    'created_at': created_at,
                     "delivery_mode": delivery_mode,
                     "price": price,
-                    "delivery_time": delivery_time,
                     "status": status, 
                     "order_notes": order_notes,
                     "local": local,
                     "name": name,
-                    "coupon": coupon,
-                    "coupon_amount": coupon_amount,
                     "phone": phone,
                     "email": email,
                     "address": address,
@@ -136,7 +129,120 @@ async def create_order(order: OrderMan):
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+    
+@router.patch("/{order_id}/local")
+async def change_order_local(order_id: str, body: ChangeLocalBody):
+    try:
+        print(f"[PATCH /orders/{{order_id}}/local] INICIANDO - order_id={order_id}, nuevo_local={body.local}")
+        with engine.begin() as conn:
+            # Buscar la orden
+            result = conn.execute(
+                text("SELECT * FROM orders WHERE id_order = :order_id"),
+                {"order_id": order_id}
+            )
 
+            order = result.mappings().first()
+
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            old_local = order["local"]
+
+            # Buscar los productos de esa orden
+            prod_result = conn.execute(
+                text("""
+                    SELECT products 
+                    FROM order_products 
+                    WHERE order_id = :order_id
+                """),
+                {"order_id": order_id}
+            )
+
+            product_list = [
+                prod_row["products"]
+                for prod_row in prod_result.mappings().all()
+            ]
+
+            # Actualizar local
+            conn.execute(
+                text("""
+                    UPDATE orders 
+                    SET local = :local 
+                    WHERE id_order = :id_order
+                """),
+                {
+                    "local": body.local,
+                    "id_order": order_id
+                }
+            )
+
+            # Convertir orden a dict
+            order_dict = dict(order)
+
+            pedido_dict = {
+                "id_order": order_dict.get("id_order"),
+                "local": body.local,
+                "status": order_dict.get("status"),
+                "name": order_dict.get("name"),
+                "email": order_dict.get("email"),
+                "phone": order_dict.get("phone"),
+                "address": order_dict.get("address"),
+                "payment_method": order_dict.get("payment_method"),
+                "delivery_mode": order_dict.get("delivery_mode"),
+                "delivery_time": order_dict.get("delivery_time"),
+                "price": order_dict.get("price"),
+                "order_notes": order_dict.get("order_notes"),
+                "coupon": order_dict.get("coupon"),
+                "coupon_amount": order_dict.get("coupon_amount"),
+                "products": product_list,
+                "created_at": (
+                    order_dict.get("created_at").isoformat()
+                    if order_dict.get("created_at")
+                    else None
+                ),
+            }
+
+            payload = {
+               "event": "order_transferred",
+                "id_order": order_id,
+                "order_id": order_id,
+                "old_local": old_local,
+                "new_local": body.local,
+                "from": old_local,
+                "to": body.local,
+                "pedido": pedido_dict
+                }
+
+            print(f"[PATCH] payload armado: event={payload['event']}, from={old_local}, to={body.local}")
+            print(f"[PATCH] Dashboards conectados: {len(manager.dashboard_connections)}")
+            print(f"[PATCH] Llamando broadcast_to_dashboards...")
+            
+            # Avisar a TODOS los DASHBOARDS (igual que new_order)
+            await manager.broadcast_to_dashboards(payload)
+            
+            print(f"[PATCH] broadcast_to_dashboards COMPLETADO")
+
+
+        return {
+            "success": True,
+            "old_local": old_local,
+            "new_local": body.local,
+            "pedido": pedido_dict,
+        }
+
+    except OperationalError as e:
+        print(f"[PATCH] Database error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database connection error: {str(e)}"
+        )
+    except Exception as e:
+        print(f"[PATCH] Error general: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error: {str(e)}"
+        )
+    
 @router.get("/getOrders", tags=["Orders"])
 async def get_orders():
     try:
@@ -187,57 +293,6 @@ async def update_order_status_simple(id_order: str, status: str = Body(..., embe
             })
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Order not found")
-            
-            # Coupon update logic for PUT endpoint
-            if status == "delivered":
-                # 1) user_client_id de la orden
-                row_order = conn.execute(
-                    text("SELECT id_user_client FROM orders WHERE id_order = :id_order"),
-                    {"id_order": id_order},
-                ).mappings().first()
-
-                user_client_id = row_order["id_user_client"] if row_order else None
-
-                if user_client_id:
-                    # 2) obtener el coupon de la orden
-                    row_coupon = conn.execute(
-                        text("SELECT coupon FROM orders WHERE id_order = :id_order"),
-                        {"id_order": id_order},
-                    ).mappings().first()
-
-                    coupon_code = row_coupon["coupon"] if row_coupon else None
-                    
-                    print(f"DEBUG: updateOrderStatus {id_order} -> delivered. User: {user_client_id}, Coupon: {coupon_code}")
-
-                    if coupon_code:
-                        clean_code = coupon_code.strip()
-                        # Resolver ID del cupon usando el nombre/código insensitive
-                        # MySQL collation is usually case-insensitive by default, but let's be sure
-                        row_coupon_id = conn.execute(
-                            text("SELECT id FROM coupons WHERE name = :code"),
-                            {"code": clean_code}
-                        ).mappings().first()
-
-                        real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
-                        print(f"DEBUG: Coupon '{clean_code}' resolved to ID: {real_coupon_id}")
-
-                        if real_coupon_id:
-                            usage_id = str(uuid.uuid4())
-                            conn.execute(
-                                text("""
-                                    INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
-                                    VALUES (:id, :user_client_id, :coupon_id, :order_id)
-                                    ON DUPLICATE KEY UPDATE id = id    
-                                """),
-                                {
-                                    "id": usage_id,
-                                    "user_client_id": user_client_id,
-                                    "coupon_id": real_coupon_id,
-                                    "order_id": id_order,
-                                },
-                            )
-                            print(f"DEBUG: Inserted usage for user {user_client_id} and coupon {real_coupon_id}")
-
             return {"message": "Order status updated successfully"}
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
@@ -255,67 +310,6 @@ VALID_TRANSITIONS = {
     "on_the_way": {"delivered"},
     "delivered": set(),
 }
-
-@router.get("/getOrdersByLocalStatusConfirmed/{local}", tags=["Orders"])
-async def get_orders_by_local_status_confirmed(local: str):
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT * FROM orders WHERE local = :local AND status = 'confirmed'"),
-                {"local": local},
-            )
-
-            orders = []
-            for row in result.mappings().all():
-                order_id = row['id_order']
-                prod_result = conn.execute(
-                    text("SELECT products FROM order_products WHERE order_id = :order_id"),
-                    {"order_id": order_id},
-                )
-                product_list = [prod_row['products'] for prod_row in prod_result.mappings().all()]
-                row = dict(row)
-                row['products'] = product_list
-                orders.append(row)
-
-            return orders
-
-    except OperationalError as e:
-        print(f"Database connection error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
-
-@router.get("/getOrdersByLocalStatus/{local}/{status}", tags=["Orders"])
-async def get_orders_by_local_status(local: str, status: str):
-    allowed_statuses = ["confirmed", "in_preparation", "on_the_way"]
-    if status not in allowed_statuses:
-        raise HTTPException(
-            status_code=400, 
-            detail=f'El estado debe ser uno de: {", ".join(allowed_statuses)}'
-        )
-    
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT * FROM orders WHERE local = :local AND status = :status ORDER BY id_order DESC"),
-                {"local": local, "status": status},
-            )
-
-            orders = []
-            for row in result.mappings().all():
-                order_id = row['id_order']
-                prod_result = conn.execute(
-                    text("SELECT products FROM order_products WHERE order_id = :order_id"),
-                    {"order_id": order_id},
-                )
-                product_list = [prod_row['products'] for prod_row in prod_result.mappings().all()]
-                row = dict(row)
-                row['products'] = product_list
-                orders.append(row)
-
-            return orders
-
-    except OperationalError as e:
-        print(f"Database connection error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
 class StatusUpdate(BaseModel):
     status: OrderStatus
@@ -378,54 +372,6 @@ async def update_order_status(
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Order not found")
 
-            # Coupon update
-            if new_status == "delivered":
-                # 1) user_client_id de la orden
-                row_order = conn.execute(
-                    text("SELECT id_user_client FROM orders WHERE id_order = :id_order"),
-                    {"id_order": id_order},
-                ).mappings().first()
-
-                user_client_id = row_order["id_user_client"] if row_order else None
-
-                if user_client_id:
-                    # 2) obtener el coupon de la orden
-                    row_coupon = conn.execute(
-                        text("SELECT coupon FROM orders WHERE id_order = :id_order"),
-                        {"id_order": id_order},
-                    ).mappings().first()
-
-                    coupon_code = row_coupon["coupon"] if row_coupon else None
-                    print(f"DEBUG: PATCH status {id_order} -> delivered. User: {user_client_id}, Coupon: {coupon_code}")
-
-                    if coupon_code:
-                        clean_code = coupon_code.strip()
-                        # Resolver ID del cupon usando el nombre/código
-                        row_coupon_id = conn.execute(
-                            text("SELECT id FROM coupons WHERE name = :code"),
-                            {"code": clean_code}
-                        ).mappings().first()
-
-                        real_coupon_id = row_coupon_id["id"] if row_coupon_id else None
-                        print(f"DEBUG: Coupon '{clean_code}' resolved to ID: {real_coupon_id}")
-
-                        if real_coupon_id:
-                            usage_id = str(uuid.uuid4())
-                            conn.execute(
-                                text("""
-                                    INSERT INTO user_client_coupon_usage (id, user_client_id, coupon_id, order_id)
-                                    VALUES (:id, :user_client_id, :coupon_id, :order_id)
-                                    ON DUPLICATE KEY UPDATE id = id    
-                                """),
-                                {
-                                    "id": usage_id,
-                                    "user_client_id": user_client_id,
-                                    "coupon_id": real_coupon_id,
-                                    "order_id": id_order,
-                                },
-                            )
-                            print(f"DEBUG: Inserted usage for user {user_client_id} and coupon {real_coupon_id}")
-
         # 5) Armar payload común para WS
         payload = {
             "event": "status_update",
@@ -451,8 +397,6 @@ async def update_order_status(
         # re-lanzo las HTTPException tal cual
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         print(f"[PATCH /orders/{id_order}/status] error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -467,6 +411,10 @@ async def delete_order(id_order: str):
                 {"order_id": id_order},
             )
 
+            conn.execute(
+                text("DELETE FROM order_coupons WHERE id_order = :id_order"),
+                {"id_order": id_order},
+            )
 
             # 2) Eliminar la orden
             result = conn.execute(
