@@ -1,3 +1,4 @@
+from email import message
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Form, Body, UploadFile, File
 import os
@@ -20,6 +21,9 @@ DOMAIN_URL = "https://api-burgerli.iwebtecnology.com/api/images"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(PROJECT_ROOT, "images")
+
+class ChangeLocalBody(BaseModel):
+    local: str
 
 @router.post("/createOrder", tags=["Orders"])
 async def create_order(order: OrderMan):
@@ -125,6 +129,119 @@ async def create_order(order: OrderMan):
     except OperationalError as e:
         print(f"Database connection error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+    
+@router.patch("/{order_id}/local")
+async def change_order_local(order_id: str, body: ChangeLocalBody):
+    try:
+        print(f"[PATCH /orders/{{order_id}}/local] INICIANDO - order_id={order_id}, nuevo_local={body.local}")
+        with engine.begin() as conn:
+            # Buscar la orden
+            result = conn.execute(
+                text("SELECT * FROM orders WHERE id_order = :order_id"),
+                {"order_id": order_id}
+            )
+
+            order = result.mappings().first()
+
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+
+            old_local = order["local"]
+
+            # Buscar los productos de esa orden
+            prod_result = conn.execute(
+                text("""
+                    SELECT products 
+                    FROM order_products 
+                    WHERE order_id = :order_id
+                """),
+                {"order_id": order_id}
+            )
+
+            product_list = [
+                prod_row["products"]
+                for prod_row in prod_result.mappings().all()
+            ]
+
+            # Actualizar local
+            conn.execute(
+                text("""
+                    UPDATE orders 
+                    SET local = :local 
+                    WHERE id_order = :id_order
+                """),
+                {
+                    "local": body.local,
+                    "id_order": order_id
+                }
+            )
+
+            # Convertir orden a dict
+            order_dict = dict(order)
+
+            pedido_dict = {
+                "id_order": order_dict.get("id_order"),
+                "local": body.local,
+                "status": order_dict.get("status"),
+                "name": order_dict.get("name"),
+                "email": order_dict.get("email"),
+                "phone": order_dict.get("phone"),
+                "address": order_dict.get("address"),
+                "payment_method": order_dict.get("payment_method"),
+                "delivery_mode": order_dict.get("delivery_mode"),
+                "delivery_time": order_dict.get("delivery_time"),
+                "price": order_dict.get("price"),
+                "order_notes": order_dict.get("order_notes"),
+                "coupon": order_dict.get("coupon"),
+                "coupon_amount": order_dict.get("coupon_amount"),
+                "products": product_list,
+                "created_at": (
+                    order_dict.get("created_at").isoformat()
+                    if order_dict.get("created_at")
+                    else None
+                ),
+            }
+
+            payload = {
+               "event": "order_transferred",
+                "id_order": order_id,
+                "order_id": order_id,
+                "old_local": old_local,
+                "new_local": body.local,
+                "from": old_local,
+                "to": body.local,
+                "pedido": pedido_dict
+                }
+
+            print(f"[PATCH] payload armado: event={payload['event']}, from={old_local}, to={body.local}")
+            print(f"[PATCH] Dashboards conectados: {len(manager.dashboard_connections)}")
+            print(f"[PATCH] Llamando broadcast_to_dashboards...")
+            
+            # Avisar a TODOS los DASHBOARDS (igual que new_order)
+            await manager.broadcast_to_dashboards(payload)
+            
+            print(f"[PATCH] broadcast_to_dashboards COMPLETADO")
+
+
+        return {
+            "success": True,
+            "old_local": old_local,
+            "new_local": body.local,
+            "pedido": pedido_dict,
+        }
+
+    except OperationalError as e:
+        print(f"[PATCH] Database error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database connection error: {str(e)}"
+        )
+    except Exception as e:
+        print(f"[PATCH] Error general: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error: {str(e)}"
+        )
     
 @router.get("/getOrders", tags=["Orders"])
 async def get_orders():
