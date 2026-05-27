@@ -89,16 +89,7 @@ async def create_order(order: OrderMan):
                     "order_id": id_order
                 })
             
-            # Coupon insertion 
-            if coupon:
-                id_order_coupons = str(uuid.uuid4())
-                conn.execute(text("""
-                    INSERT INTO order_coupons (id_order_coupons, id_order, name) VALUES (:id_order_coupons, :id_order, :name)
-                """), {
-                    "id_order_coupons": id_order_coupons,
-                    "id_order": id_order,
-                    "name": coupon
-                })
+            # Coupon is already stored in the orders table's coupon column
 
             # ACA VA WEBSOCKET
                 # 2️⃣ Notificar a dashboards
@@ -411,11 +402,6 @@ async def delete_order(id_order: str):
                 {"order_id": id_order},
             )
 
-            conn.execute(
-                text("DELETE FROM order_coupons WHERE id_order = :id_order"),
-                {"id_order": id_order},
-            )
-
             # 2) Eliminar la orden
             result = conn.execute(
                 text("DELETE FROM orders WHERE id_order = :id_order"),
@@ -456,4 +442,4 @@ async def delete_order(id_order: str):
         )
     except Exception as e:
         print(f"[DELETE /deleteOrder/{id_order}] error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error" + str(e))
