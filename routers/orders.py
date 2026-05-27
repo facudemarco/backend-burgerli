@@ -29,12 +29,12 @@ class ChangeLocalBody(BaseModel):
 async def create_order(order: OrderMan):
     try:
         id_order = str(uuid.uuid4())
-        # Validar que user_client_id sea un UUID válido
+        # Validar que id_user_client sea un UUID válido
         user_client_id = None
-        if order.user_client_id:
+        if order.id_user_client:
             try:
-                uuid.UUID(order.user_client_id)
-                user_client_id = order.user_client_id
+                uuid.UUID(order.id_user_client)
+                user_client_id = order.id_user_client
             except (ValueError, AttributeError):
                 user_client_id = None
         
@@ -61,11 +61,11 @@ async def create_order(order: OrderMan):
 
         with engine.begin() as conn:
             conn.execute(text("""
-                INSERT INTO orders (id_order, user_client_id, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
-                VALUES (:id_order, :user_client_id, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
+                INSERT INTO orders (id_order, id_user_client, payment_method, delivery_mode, price, status, order_notes, local, name, phone, email, address)
+                VALUES (:id_order, :id_user_client, :payment_method, :delivery_mode, :price, :status, :order_notes, :local, :name, :phone, :email, :address)
             """), {
                 "id_order": id_order,
-                "user_client_id": user_client_id,
+                "id_user_client": user_client_id,
                 "payment_method": payment_method,
                 "delivery_mode": delivery_mode,
                 "price": price,
