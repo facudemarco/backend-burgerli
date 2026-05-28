@@ -149,10 +149,10 @@ async def change_order_local(order_id: str, body: ChangeLocalBody):
                 {"order_id": order_id}
             )
 
-            product_list = [
+           product_list = [
                 prod_row["products"]
                 for prod_row in prod_result.mappings().all()
-            ]
+           ]
 
             # Actualizar local
             conn.execute(
@@ -185,7 +185,7 @@ async def change_order_local(order_id: str, body: ChangeLocalBody):
                 "order_notes": order_dict.get("order_notes"),
                 "coupon": order_dict.get("coupon"),
                 "coupon_amount": order_dict.get("coupon_amount"),
-                "products": order_dict.get("products"),
+                "products": product_list,
                 "created_at": (
                     order_dict.get("created_at").isoformat()
                     if order_dict.get("created_at")
