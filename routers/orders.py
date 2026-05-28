@@ -149,8 +149,13 @@ async def change_order_local(order_id: str, body: ChangeLocalBody):
                 {"order_id": order_id}
             )
 
-            product_list = prod_result.scalars().all()
+            product_parts = prod_result.scalars().all()
 
+            if product_parts:
+                product_list = ["{" + ", ".join(product_parts) + "}"]
+            else:
+                product_list = []
+                
             # Actualizar local
             conn.execute(
                 text("""
