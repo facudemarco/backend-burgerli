@@ -54,7 +54,7 @@ async def create_order(order: OrderMan):
 
         normalized_products = []
         for product in products:
-            if isinstance(product, str) and "," in product:
+            if isinstance(product, str) and "," in product and not (product.strip().startswith("{") or product.strip().startswith("[")):
                 normalized_products.extend([p.strip() for p in product.split(",") if p.strip()])
             elif product:
                 normalized_products.append(product.strip())
@@ -149,16 +149,7 @@ async def change_order_local(order_id: str, body: ChangeLocalBody):
                 {"order_id": order_id}
             )
 
-            product_parts = prod_result.scalars().all()
-            if product_parts:
-                clean_parts = [
-                    part.strip().removeprefix("{").removesuffix("}")
-                    for part in product_parts
-                ]
-                
-                product_list = ["{" + ", ".join(clean_parts) + "}"]
-            else:
-                product_list = []
+            product_list = [row['products'] for row in prod_result.mappings().all()]
                 
             # Actualizar local
             conn.execute(
